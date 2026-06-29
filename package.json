@@ -1,0 +1,32 @@
+{
+  "name": "usm-ai-chat",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test:e2e": "NODE_OPTIONS='--import tsx' cucumber-js",
+    "cf:build": "opennextjs-cloudflare build",
+    "cf:preview": "opennextjs-cloudflare build && wrangler dev",
+    "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
+  },
+  "dependencies": {
+    "next": "^14.2.35",
+    "openai": "^6.44.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@cucumber/cucumber": "^13.0.0",
+    "@opennextjs/cloudflare": "^1.13.0",
+    "@playwright/test": "^1.61.0",
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "tsx": "^4.22.4",
+    "typescript": "^5.5.3",
+    "wrangler": "^4.103.0"
+  }
+}

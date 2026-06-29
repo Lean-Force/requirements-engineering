@@ -1,0 +1,46 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+
+# env files
+.env
+.env*.local
+# wrangler のローカル用シークレット(wrangler dev で読み込まれる)
+.dev.vars
+
+# Cloudflare / OpenNext ビルド成果物
+/.open-next/
+.wrangler/
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# ローカルの保存データ(永続化ファイル)
+/data/storymap.json
+
+# E2E 用の隔離データファイル
+/data/e2e-storymap.json
+
+# E2E スクリーンショット
+/e2e-screenshots/
+
+# 探索テスト用の隔離データ
+/data/explore-storymap.json
+
+# 作業用バックアップ・スクラッチ
+/.ui-backup-panzoom/
+/e2e-explore-tmp.ts
