@@ -72,16 +72,16 @@ function InlineInput({
   return multiline ? <textarea {...common} /> : <input {...common} />;
 }
 
-// アクターごとの色。原色の付箋ではなく、淡いティント地 + 彩度のある縁(=モダンなカード)。
+// アクターごとの色(付箋色)。
 const ACTOR_COLORS = [
-  { bg: "#fbf1da", border: "#d99e34" }, // amber
-  { bg: "#e3f0e6", border: "#5aa873" }, // green
-  { bg: "#e2ecf9", border: "#5688cf" }, // blue
-  { bg: "#ece7f8", border: "#8f78cf" }, // violet
-  { bg: "#fbe7dd", border: "#d98a5e" }, // clay
-  { bg: "#fbe5ec", border: "#d3789a" }, // pink
-  { bg: "#dff0ef", border: "#52a6a3" }, // teal
-  { bg: "#f4f1dc", border: "#b3a548" }, // olive
+  { bg: "#f2c94c", border: "#d4ab2c" },
+  { bg: "#fdf1ad", border: "#e6cf6a" },
+  { bg: "#bfe3c0", border: "#8fce91" },
+  { bg: "#bcd9f5", border: "#8cb8e6" },
+  { bg: "#f6c9a8", border: "#e0a376" },
+  { bg: "#e6c7f0", border: "#c79bd6" },
+  { bg: "#f7b9c4", border: "#e08aa0" },
+  { bg: "#c9e7e6", border: "#92c9c7" },
 ];
 
 const COL_W = 140; // 列(アクティビティ)の幅。全列一定。ストーリーは縦積みなので横に広げない。
@@ -303,6 +303,27 @@ export default function Board({ storyMap, onChange }: Props) {
                 </div>
               );
             })}
+
+            {/* アクター追加(全アクター共通・1つだけ) */}
+            <div className="add-actor-row">
+              {editor?.mode === "actor-add" ? (
+                <InlineInput
+                  className="actor-input"
+                  initial=""
+                  placeholder="アクター名(例: 管理者)"
+                  onCommit={commitAddActor}
+                  onCancel={() => setEditor(null)}
+                />
+              ) : (
+                <button
+                  className="add-actor-add"
+                  title="アクターを追加"
+                  onClick={() => setEditor({ mode: "actor-add" })}
+                >
+                  ＋ アクター
+                </button>
+              )}
+            </div>
           </div>
 
       {/* ナラティブフロー(時系列) */}
@@ -430,27 +451,6 @@ export default function Board({ storyMap, onChange }: Props) {
           </div>
         </div>
       )}
-
-      {/* アクター追加(全アクター共通・1つだけ) */}
-      <div className="add-actor-row">
-        {editor?.mode === "actor-add" ? (
-          <InlineInput
-            className="actor-input"
-            initial=""
-            placeholder="アクター名(例: 管理者)"
-            onCommit={commitAddActor}
-            onCancel={() => setEditor(null)}
-          />
-        ) : (
-          <button
-            className="add-actor-add"
-            title="アクターを追加"
-            onClick={() => setEditor({ mode: "actor-add" })}
-          >
-            ＋ アクター
-          </button>
-        )}
-      </div>
     </div>
   );
 }
