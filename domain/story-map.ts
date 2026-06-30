@@ -87,6 +87,18 @@ export function addActor(map: StoryMap, name: string): StoryMap {
   return { ...map, actors: [...map.actors, createActor(name)] };
 }
 
+/** アクターを削除。各 activity からそのアクターの action(配下の story も)をカスケード削除。 */
+export function removeActor(map: StoryMap, actorId: string): StoryMap {
+  return {
+    ...map,
+    actors: map.actors.filter((a) => a.id !== actorId),
+    activities: map.activities.map((activity) => ({
+      ...activity,
+      actions: activity.actions.filter((a) => a.actorId !== actorId),
+    })),
+  };
+}
+
 /** アクティビティを追加。index 省略で末尾、指定で途中(その位置)に挿入。 */
 export function addActivity(map: StoryMap, index?: number): StoryMap {
   const activities = [...map.activities];

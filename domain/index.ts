@@ -26,6 +26,7 @@ export {
   emptyStoryMap,
   normalizeStoryMap,
   addActor,
+  removeActor,
   addActivity,
   removeActivity,
   addAction,

@@ -122,6 +122,21 @@ export default function Board({ storyMap, onChange }: Props) {
     if (name.trim()) onChange(domain.addActor(storyMap, name.trim()));
   };
 
+  const removeActor = (actorId: string) => {
+    if (window.confirm("このアクター(行)を削除しますか?配下の行動・ストーリーも消えます。"))
+      onChange(domain.removeActor(storyMap, actorId));
+  };
+
+  // 行動の削除(配下にストーリーがあるときだけ確認)。
+  const removeActionCard = (activityId: string, actionId: string, storyCount: number) => {
+    if (storyCount === 0 || window.confirm("この行動を削除しますか?配下のストーリーも消えます。"))
+      onChange(domain.removeAction(storyMap, activityId, actionId));
+  };
+
+  // ストーリーの削除(末端なので確認なし)。
+  const removeStoryCard = (activityId: string, actionId: string, storyId: string) =>
+    onChange(domain.removeStory(storyMap, activityId, actionId, storyId));
+
   const commitAddAction = (activityId: string, actorId: string, text: string) => {
     setEditor(null);
     if (text.trim()) onChange(domain.addAction(storyMap, activityId, actorId, text.trim()));
@@ -209,6 +224,13 @@ export default function Board({ storyMap, onChange }: Props) {
                     style={{ background: color.bg, borderColor: color.border }}
                   >
                     {actor.name}
+                    <button
+                      className="del-actor"
+                      title="このアクター(行)を削除"
+                      onClick={() => removeActor(actor.id)}
+                    >
+                      ×
+                    </button>
                   </div>
                   <div className="lane-flow">
                     {activities.map((activity, gi) => {
@@ -259,6 +281,16 @@ export default function Board({ storyMap, onChange }: Props) {
                               <span style={{ fontSize: noteFontSize(action.text) }}>
                                 {action.text}
                               </span>
+                              <button
+                                className="del-note"
+                                title="この行動を削除"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  removeActionCard(activity.id, action.id, action.stories.length);
+                                }}
+                              >
+                                ×
+                              </button>
                             </div>
                           ) : editor?.mode === "action-add" &&
                             editor.activityId === activity.id &&
@@ -383,6 +415,16 @@ export default function Board({ storyMap, onChange }: Props) {
                               <span style={{ fontSize: noteFontSize(st.text) }}>
                                 {st.text}
                               </span>
+                              <button
+                                className="del-story"
+                                title="このストーリーを削除"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  removeStoryCard(activity.id, action.id, st.id);
+                                }}
+                              >
+                                ×
+                              </button>
                             </div>
                           ),
                         );
