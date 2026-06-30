@@ -1,12 +1,10 @@
 // インフラ層: ストーリーマップ・会話・版履歴の保存先。
 //
-// 保存先はポート(StoryMapRepository)で抽象化し、実装を環境で差し替える。
+// 保存先はポート(StoryMapRepository)で抽象化する。
 //   - ローカル / E2E : FileStoryMapRepository(JSON ファイル)
-//   - Cloudflare 本番 : KvStoryMapRepository(Workers KV)
 // このモジュールは「版の重複排除・上限・連続編集の畳み込み」といった方針を一手に引き受け、
 // 上位(app/api)へは用途別の関数として公開する。
 
-import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { normalizeStoryMap } from "@/domain";
 import type { StoryMap } from "@/domain";
 import type {
@@ -18,28 +16,16 @@ import type {
 } from "@/contracts";
 import type { StoryMapRepository } from "./repository";
 import { FileStoryMapRepository } from "./file-repository";
-import { KvStoryMapRepository, type KvLike } from "./kv-repository";
 
 export type { StoryMapRepository } from "./repository";
 export { FileStoryMapRepository } from "./file-repository";
-export { KvStoryMapRepository } from "./kv-repository";
-export type { KvLike } from "./kv-repository";
 
 // 版履歴の保持上限(最新 N 件だけ保持し、古いものから捨てる)と、会話の保持上限。
 const MAX_VERSIONS = 10;
 const MAX_MESSAGES = 400;
 
-// 実行環境に応じて保存先実装を選ぶ。
-// STORAGE_BACKEND=kv のとき(Cloudflare 本番)は KV バインディングを使う。
+// 保存先実装。STORYMAP_FILE で保存ファイルを差し替えられる(E2E の隔離用)。
 function repo(): StoryMapRepository {
-  if (process.env.STORAGE_BACKEND === "kv") {
-    const { env } = getCloudflareContext();
-    const kv = (env as Record<string, unknown>).STORYMAP_KV as KvLike | undefined;
-    if (!kv) {
-      throw new Error("KV バインディング STORYMAP_KV が見つかりません");
-    }
-    return new KvStoryMapRepository(kv);
-  }
   return new FileStoryMapRepository(process.env.STORYMAP_FILE);
 }
 

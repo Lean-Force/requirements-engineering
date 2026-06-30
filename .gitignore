@@ -5,6 +5,10 @@
 /.next/
 /out/
 
+# ローカルのビルド/ツールキャッシュ(誤コミット防止)
+/.open-next/
+/.wrangler/
+
 # production
 /build
 
@@ -18,12 +22,6 @@ npm-debug.log*
 # env files
 .env
 .env*.local
-# wrangler のローカル用シークレット(wrangler dev で読み込まれる)
-.dev.vars
-
-# Cloudflare / OpenNext ビルド成果物
-/.open-next/
-.wrangler/
 
 # typescript
 *.tsbuildinfo
