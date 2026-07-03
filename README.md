@@ -74,8 +74,12 @@ contracts.ts     層をまたぐ転送DTO(ChatMessage / KnowledgeState / BoardEv
 ui/              表現層(Board / ChatPanel / ContextPanel / BoardSwitcher /
                  CardEditModal / hooks = useUndoRedo・useBoardEvents)
 app/             配線(ページ / API ルート)
-tests/unit/      vitest(domain・知識ベース・スキーマ同期。npm run test:unit)
+tests/unit/      vitest(domain・知識ベース・スキーマ同期・アーキテクチャ。npm run test:unit)
 ```
+
+層の依存ルール(モジュールの責務定義)は `.dependency-cruiser.cjs` が唯一の正。
+`npm run check:deps`(CLI)と `tests/unit/architecture.test.ts`(ArchUnit スタイルの
+テスト)の両方で強制され、違反はテスト失敗として現れる。
 
 - **チャット → マップ生成**: `/api/boards/<id>/chat` が会話履歴と現在のマップを `infrastructure/agent`(Claude Agent SDK + `json_schema` 構造化出力)に渡し、「返信」+「更新後のマップ全体」を受け取り、`domain.applyAiUpdate`(正規化 → 確定保護 → 表示順引き継ぎ → 正規化)で整えて保存する。AI ターンはボード単位のミューテックスで直列化。
 - **ボード = 業務**: `data/workspaces/<boardId>/` にマップ・会話・版履歴・知識ベースを集約(`data/boards.json` が一覧)。旧シングルボード形式は初回アクセス時に「最初のボード」へ自動移行される。
