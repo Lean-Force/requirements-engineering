@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { isConfigured, generate } from "@/infrastructure/agent";
 import { loadStoryMap, applyChatTurn } from "@/infrastructure/storage";
-import { enabledSkillNames } from "@/infrastructure/context/store";
+import { prepareSkillsForChat } from "@/infrastructure/context/store";
 import { withChatLock } from "@/infrastructure/chat-lock";
 import { emit } from "@/infrastructure/events";
+import { getBoard } from "@/infrastructure/boards";
 import { normalizeStoryMap } from "@/domain";
 import type { StoryMap } from "@/domain";
 import type { ChatMessage, ChatResponse } from "@/contracts";
 
 export const dynamic = "force-dynamic";
-// エージェントループ(参照資料の読み込みを含む)に時間がかかることがある
+// エージェントループ(ドメイン知識の読み込みを含む)に時間がかかることがある
 export const maxDuration = 300;
 
 interface ChatRequestBody {
@@ -17,7 +18,13 @@ interface ChatRequestBody {
   storyMap: StoryMap;
 }
 
-export async function POST(request: Request) {
+interface Params {
+  params: { boardId: string };
+}
+
+export async function POST(request: Request, { params }: Params) {
+  const { boardId } = params;
+
   if (!isConfigured()) {
     return NextResponse.json(
       {
@@ -25,6 +32,15 @@ export async function POST(request: Request) {
           "LLM が未設定です。CLAUDE_CODE_USE_BEDROCK=1(+ AWS 認証)または ANTHROPIC_API_KEY を設定してサーバーを再起動してください。",
       },
       { status: 500 },
+    );
+  }
+
+  try {
+    await getBoard(boardId);
+  } catch {
+    return NextResponse.json(
+      { error: "指定のボードが見つかりません" },
+      { status: 404 },
     );
   }
 
@@ -41,12 +57,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "messages が空です" }, { status: 400 });
   }
 
-  // 共有ボードのため AI ターンは到着順に直列処理する
-  return withChatLock(async () => {
-    emit("chat:start");
+  // 同じボードを共有するメンバーの AI ターンは到着順に直列処理する
+  return withChatLock(boardId, async () => {
+    emit(boardId, "chat:start");
     try {
       // ミューテックス通過後に読み直す(直前のターンの結果を正とする)
-      const currentMap = await loadStoryMap();
+      const currentMap = await loadStoryMap(boardId);
 
       // 最後のユーザーメッセージに現在のマップ(JSON)を文脈として付与する
       const conversation: ChatMessage[] = messages.map((m) => ({ ...m }));
@@ -60,8 +76,9 @@ export async function POST(request: Request) {
 ${JSON.stringify(currentMap)}`,
       };
 
-      const skills = await enabledSkillNames();
-      const parsed = await generate(conversation, skills);
+      // このボード(業務)の知識 + 共通知識(同期コピー)の skill 名を用意する
+      const skills = await prepareSkillsForChat(boardId);
+      const parsed = await generate(boardId, conversation, skills);
 
       // アクター/actorId のゆれを正規化
       const updatedMap = normalizeStoryMap(parsed.storyMap);
@@ -72,6 +89,7 @@ ${JSON.stringify(currentMap)}`,
         { role: "assistant", content: parsed.reply },
       ];
       const { storyMap, versions } = await applyChatTurn(
+        boardId,
         updatedMap,
         parsed.reply,
         fullConversation,
@@ -87,7 +105,7 @@ ${JSON.stringify(currentMap)}`,
       );
     } finally {
       // 成否に関わらず終了を通知(他クライアントはこれを機に再取得する)
-      emit("chat:end");
+      emit(boardId, "chat:end");
     }
   });
 }

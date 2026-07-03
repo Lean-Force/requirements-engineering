@@ -5,6 +5,7 @@
 // このモジュールは「版の重複排除・上限・連続編集の畳み込み」といった方針を一手に引き受け、
 // 上位(app/api)へは用途別の関数として公開する。
 
+import path from "path";
 import { normalizeStoryMap } from "@/domain";
 import type { StoryMap } from "@/domain";
 import type {
@@ -16,6 +17,7 @@ import type {
 } from "@/contracts";
 import type { StoryMapRepository } from "./repository";
 import { FileStoryMapRepository } from "./file-repository";
+import { workspaceDir } from "../context/workspace";
 
 export type { StoryMapRepository } from "./repository";
 export { FileStoryMapRepository } from "./file-repository";
@@ -24,9 +26,11 @@ export { FileStoryMapRepository } from "./file-repository";
 const MAX_VERSIONS = 10;
 const MAX_MESSAGES = 400;
 
-// 保存先実装。STORYMAP_FILE で保存ファイルを差し替えられる(E2E の隔離用)。
-function repo(): StoryMapRepository {
-  return new FileStoryMapRepository(process.env.STORYMAP_FILE);
+// 保存先実装。ボードのワークスペース内 session.json に保存する。
+function repo(boardId: string): StoryMapRepository {
+  return new FileStoryMapRepository(
+    path.join(workspaceDir(boardId), "session.json"),
+  );
 }
 
 function makeVersion(
@@ -78,23 +82,24 @@ function pushVersion(
 // ---- 公開 API ------------------------------------------------------------
 
 // 現在のマップだけが欲しい場合(後方互換)。
-export async function loadStoryMap(): Promise<StoryMap> {
-  return (await repo().loadSession()).storyMap;
+export async function loadStoryMap(boardId: string): Promise<StoryMap> {
+  return (await repo(boardId).loadSession()).storyMap;
 }
 
 // 初期ロード用。マップ・会話・版一覧(メタ)をまとめて返す。
-export async function loadSession(): Promise<SessionState> {
-  const s = await repo().loadSession();
+export async function loadSession(boardId: string): Promise<SessionState> {
+  const s = await repo(boardId).loadSession();
   return { storyMap: s.storyMap, messages: s.messages, versions: s.versions.map(toMeta) };
 }
 
 // ボード編集など、マップだけを保存する。版を 1 つ積んで最新の版一覧を返す。
 export async function saveStoryMap(
+  boardId: string,
   map: StoryMap,
   source: StoryMapVersion["source"] = "edit",
   summary = "ボードを編集",
 ): Promise<StoryMapVersionMeta[]> {
-  const r = repo();
+  const r = repo(boardId);
   const s = await r.loadSession();
   const normalized = normalizeStoryMap(map);
   pushVersion(s, source, summary, normalized);
@@ -105,11 +110,12 @@ export async function saveStoryMap(
 
 // チャット 1 ターンを一括で反映(マップ更新 + 版追加 + 会話保存)を 1 回の保存で行う。
 export async function applyChatTurn(
+  boardId: string,
   map: StoryMap,
   reply: string,
   messages: ChatMessage[],
 ): Promise<{ storyMap: StoryMap; versions: StoryMapVersionMeta[] }> {
-  const r = repo();
+  const r = repo(boardId);
   const s = await r.loadSession();
   const normalized = normalizeStoryMap(map);
   pushVersion(s, "chat", reply, normalized);
@@ -120,25 +126,26 @@ export async function applyChatTurn(
 }
 
 // 会話履歴を消す(マップ・版はそのまま)。
-export async function clearMessages(): Promise<void> {
-  const r = repo();
+export async function clearMessages(boardId: string): Promise<void> {
+  const r = repo(boardId);
   const s = await r.loadSession();
   s.messages = [];
   await r.saveSession(s);
 }
 
 // 版の一覧(メタ)。
-export async function listVersions(): Promise<StoryMapVersionMeta[]> {
-  return (await repo().loadSession()).versions.map(toMeta);
+export async function listVersions(boardId: string): Promise<StoryMapVersionMeta[]> {
+  return (await repo(boardId).loadSession()).versions.map(toMeta);
 }
 
 // 指定の版を現在のマップとして復元する。
 // 復元は「過去の状態へ戻るナビゲーション」であり新しい変更ではないため、版は積まない
 // (戻る前の状態はすでに版として残っているので失われない)。これで履歴が増殖しない。
 export async function restoreVersion(
+  boardId: string,
   id: string,
 ): Promise<{ storyMap: StoryMap; versions: StoryMapVersionMeta[] }> {
-  const r = repo();
+  const r = repo(boardId);
   const s = await r.loadSession();
   const target = s.versions.find((v) => v.id === id);
   if (!target) {

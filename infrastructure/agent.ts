@@ -22,7 +22,7 @@ import type {
   KnowledgeCategory,
 } from "@/contracts";
 import type { StoryMap } from "@/domain";
-import { workspaceDir } from "./context/workspace";
+import { dataRoot, workspaceDir } from "./context/workspace";
 
 /** LLM の接続設定があるか(Bedrock / Anthropic API 直結 / ローカル認証のいずれか) */
 export function isConfigured(): boolean {
@@ -134,13 +134,14 @@ function renderConversation(conversation: ChatMessage[]): string {
 
 /**
  * 会話履歴から「返信 + 更新後マップ」を生成する。
- * skillNames には有効なコンテキスト(skill 名)を渡す。空配列なら資料なし。
+ * skillNames には有効なドメイン知識(skill 名)を渡す。空配列なら知識なし。
  */
 export async function generate(
+  boardId: string,
   conversation: ChatMessage[],
   skillNames: string[],
 ): Promise<Pick<ChatResponse, "reply" | "storyMap">> {
-  const workspace = workspaceDir();
+  const workspace = workspaceDir(boardId);
   // cwd に指定するため、初回チャット時などまだ無ければ作る(無いと spawn に失敗する)
   await fs.mkdir(workspace, { recursive: true });
   const maxTurns = Number(process.env.CHAT_MAX_TURNS || 24);
@@ -282,13 +283,14 @@ export async function extractKnowledge(
   fileName: string,
   markdown: string,
 ): Promise<ExtractedEntry[]> {
-  // cwd に指定するため、まだ無ければ作る(無いと spawn に失敗する)
-  await fs.mkdir(workspaceDir(), { recursive: true });
+  // cwd に指定するため、まだ無ければ作る(無いと spawn に失敗する)。
+  // 抽出はツールを使わないためスコープに依存しない(データルート直下で実行)。
+  await fs.mkdir(dataRoot(), { recursive: true });
   const q = query({
     prompt: `次の資料からドメイン知識を抽出してください。\n\n# 資料: ${fileName}\n\n${markdown}`,
     options: {
       model: process.env.ANTHROPIC_MODEL || undefined,
-      cwd: workspaceDir(),
+      cwd: dataRoot(),
       systemPrompt: EXTRACT_SYSTEM_PROMPT,
       settingSources: [],
       allowedTools: [],

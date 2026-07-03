@@ -4,15 +4,13 @@ import type { BoardSession } from "@/contracts";
 import type { StoryMapRepository } from "./repository";
 import { emptySession, normalizeSession } from "./session";
 
-// ローカル開発 / E2E 用の実装。セッション全体を 1 つの JSON ファイルに読み書きする。
-// テスト時は STORYMAP_FILE で別ファイルに隔離できる(本番サンプル data/storymap.json を汚さない)。
+// セッション(マップ・会話・版履歴)をボードのワークスペース内の JSON ファイルに読み書きする。
+// テスト時は DATA_DIR でデータ全体を隔離できる(本番データを汚さない)。
 export class FileStoryMapRepository implements StoryMapRepository {
   private readonly file: string;
 
-  constructor(file?: string) {
-    this.file = file
-      ? path.resolve(file)
-      : path.join(process.cwd(), "data", "storymap.json");
+  constructor(file: string) {
+    this.file = path.resolve(file);
   }
 
   async loadSession(): Promise<BoardSession> {

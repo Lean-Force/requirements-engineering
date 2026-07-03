@@ -5,7 +5,11 @@ import type { KnowledgeState, SourceMeta } from "@/contracts";
 
 interface Props {
   knowledge: KnowledgeState;
-  onUpload: (files: FileList) => Promise<string | null>;
+  /** ボード名(アップロード先の表示に使う) */
+  boardName: string;
+  /** API のベースパス(例: /api/boards/<id>) */
+  apiBase: string;
+  onUpload: (files: FileList, common: boolean) => Promise<string | null>;
   onToggle: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
@@ -18,6 +22,8 @@ interface Viewer {
 
 export default function ContextPanel({
   knowledge,
+  boardName,
+  apiBase,
   onUpload,
   onToggle,
   onDelete,
@@ -25,6 +31,8 @@ export default function ContextPanel({
 }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  // アップロード先: false = このボード(業務)の知識 / true = 業務横断の共通知識
+  const [asCommon, setAsCommon] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewer, setViewer] = useState<Viewer | null>(null);
 
@@ -34,7 +42,7 @@ export default function ContextPanel({
     if (!files || files.length === 0) return;
     setUploading(true);
     setError(null);
-    const message = await onUpload(files);
+    const message = await onUpload(files, asCommon);
     if (message) setError(message);
     setUploading(false);
     if (fileInput.current) fileInput.current.value = "";
@@ -44,7 +52,7 @@ export default function ContextPanel({
   const openCategory = async (category: string, label: string) => {
     setViewer({ title: label, markdown: null });
     try {
-      const res = await fetch(`/api/contexts/knowledge/${category}`);
+      const res = await fetch(`${apiBase}/contexts/knowledge/${category}`);
       const data = await res.json();
       setViewer({
         title: label,
@@ -59,26 +67,58 @@ export default function ContextPanel({
 
   // ソースから抽出されたエントリを開く(出典確認)
   const openSource = async (source: SourceMeta) => {
-    setViewer({ title: `${source.fileName} からの抽出結果`, markdown: null });
+    const title = `${source.fileName} からの抽出結果`;
+    setViewer({ title, markdown: null });
     try {
-      const res = await fetch(`/api/contexts/${source.id}`);
+      const res = await fetch(`${apiBase}/contexts/${source.id}`);
       const data = await res.json();
       setViewer({
-        title: `${source.fileName} からの抽出結果`,
+        title,
         markdown: res.ok
           ? (data.markdown as string)
           : `⚠️ ${data.error ?? "読み込みに失敗しました"}`,
       });
     } catch {
-      setViewer({
-        title: `${source.fileName} からの抽出結果`,
-        markdown: "⚠️ 読み込みに失敗しました",
-      });
+      setViewer({ title, markdown: "⚠️ 読み込みに失敗しました" });
     }
   };
 
   const { sources, categories } = knowledge;
+  const boardSources = sources.filter((s) => s.scope === "board");
+  const commonSources = sources.filter((s) => s.scope === "common");
   const totalEntries = categories.reduce((n, c) => n + c.count, 0);
+
+  const renderSource = (s: SourceMeta) => (
+    <div key={s.id} className={`context-item${s.enabled ? "" : " off"}`}>
+      <div className="context-item-top">
+        <div className="context-toggle">
+          <input
+            type="checkbox"
+            checked={s.enabled}
+            onChange={(e) => onToggle(s.id, e.target.checked)}
+            aria-label="この資料の知識を AI に提示する"
+            title="この資料の知識を AI に提示する"
+          />
+          <button
+            className="context-name"
+            onClick={() => openSource(s)}
+            title="抽出結果を表示"
+          >
+            {s.fileName}
+          </button>
+        </div>
+        <button
+          className="context-delete"
+          onClick={() => onDelete(s.id)}
+          aria-label="削除"
+          title="削除(抽出済みの知識も消えます)"
+        >
+          ×
+        </button>
+      </div>
+      <div className="context-meta">{s.entryCount} 件の知識を抽出</div>
+    </div>
+  );
 
   return (
     <div className="context-panel">
@@ -107,15 +147,25 @@ export default function ContextPanel({
           style={{ display: "none" }}
           onChange={(e) => handleFiles(e.target.files)}
         />
+        <label className="context-common-toggle">
+          <input
+            type="checkbox"
+            checked={asCommon}
+            onChange={(e) => setAsCommon(e.target.checked)}
+          />
+          業務横断の共通知識として登録(全ボードで参照される)
+        </label>
         <div className="context-hint">
-          追加した資料から AI がドメイン知識(用語・フロー・制約など)を抽出し、
-          チーム全員で共有します。マップ整理の際に必要な知識だけを参照します。
+          {asCommon
+            ? "全社用語集・組織図など、どの業務にも共通する資料向け。"
+            : `「${boardName}」の知識として登録します。`}
+          追加した資料から AI がドメイン知識を抽出し、チーム全員で共有します。
         </div>
         {error && <div className="context-error">⚠️ {error}</div>}
       </div>
 
       <div className="context-list">
-        <div className="context-section-title">知識カテゴリ</div>
+        <div className="context-section-title">知識カテゴリ(ボード + 共通)</div>
         {categories.map((c) => (
           <button
             key={c.category}
@@ -128,46 +178,21 @@ export default function ContextPanel({
           </button>
         ))}
 
-        <div className="context-section-title">取り込み済み資料</div>
-        {sources.length === 0 && (
+        <div className="context-section-title">このボードの資料</div>
+        {boardSources.length === 0 && (
           <div className="context-empty">
-            まだ資料がありません。要件一覧・業務フロー・議事録・用語集などを
-            追加すると、AI がドメイン知識に分解して蓄積します。
+            まだ資料がありません。要件一覧・業務フロー・議事録などを追加すると、
+            AI がドメイン知識に分解して蓄積します。
           </div>
         )}
-        {sources.map((s) => (
-          <div key={s.id} className={`context-item${s.enabled ? "" : " off"}`}>
-            <div className="context-item-top">
-              <div className="context-toggle">
-                <input
-                  type="checkbox"
-                  checked={s.enabled}
-                  onChange={(e) => onToggle(s.id, e.target.checked)}
-                  aria-label="この資料の知識を AI に提示する"
-                  title="この資料の知識を AI に提示する"
-                />
-                <button
-                  className="context-name"
-                  onClick={() => openSource(s)}
-                  title="抽出結果を表示"
-                >
-                  {s.fileName}
-                </button>
-              </div>
-              <button
-                className="context-delete"
-                onClick={() => onDelete(s.id)}
-                aria-label="削除"
-                title="削除(抽出済みの知識も消えます)"
-              >
-                ×
-              </button>
-            </div>
-            <div className="context-meta">
-              {s.entryCount} 件の知識を抽出
-            </div>
-          </div>
-        ))}
+        {boardSources.map(renderSource)}
+
+        {commonSources.length > 0 && (
+          <>
+            <div className="context-section-title">共通の資料(業務横断)</div>
+            {commonSources.map(renderSource)}
+          </>
+        )}
       </div>
 
       {viewer && (

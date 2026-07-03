@@ -59,6 +59,8 @@ export type KnowledgeCategory =
 export interface SourceMeta {
   id: string;
   fileName: string;
+  /** board = このボード(業務)の知識 / common = 業務横断の共通知識 */
+  scope: "board" | "common";
   /** このソース由来の知識を AI に提示するか(チーム共有の状態) */
   enabled: boolean;
   /** 抽出されたエントリ数 */
@@ -95,5 +97,14 @@ export interface KnowledgeState {
 /** サーバーから push されるボード同期イベント(SSE) */
 export interface BoardEvent {
   type: "storymap" | "chat:start" | "chat:end" | "contexts";
+  /** 対象ボード。"*" は全ボード向け(共通知識の変更など) */
+  boardId: string;
   at: string;
+}
+
+/** ボード(= 業務)のメタ情報 */
+export interface BoardMeta {
+  id: string;
+  name: string;
+  createdAt: string;
 }

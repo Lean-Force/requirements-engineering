@@ -29,9 +29,12 @@ next-env.d.ts
 
 # ローカルの保存データ(永続化ファイル)
 /data/storymap.json
+/data/boards.json
+/data/workspaces/
 
-# E2E 用の隔離データファイル
+# E2E 用の隔離データ
 /data/e2e-storymap.json
+/data/e2e-data/
 
 # E2E スクリーンショット
 /e2e-screenshots/

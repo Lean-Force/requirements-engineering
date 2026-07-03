@@ -1,330 +1,99 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import Board from "@/ui/Board";
-import PanZoom from "@/ui/PanZoom";
-import ChatPanel from "@/ui/ChatPanel";
-import HistoryPanel from "@/ui/HistoryPanel";
-import ContextPanel from "@/ui/ContextPanel";
-import { emptyStoryMap } from "@/domain";
-import type { StoryMap } from "@/domain";
-import type {
-  BoardEvent,
-  ChatMessage,
-  ChatResponse,
-  KnowledgeState,
-  SessionState,
-  StoryMapVersionMeta,
-} from "@/contracts";
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import type { BoardMeta } from "@/contracts";
 
-const EMPTY_KNOWLEDGE: KnowledgeState = { sources: [], categories: [] };
-
-export default function Home() {
-  const [storyMap, setStoryMap] = useState<StoryMap>(emptyStoryMap());
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [versions, setVersions] = useState<StoryMapVersionMeta[]>([]);
-  const [knowledge, setKnowledge] = useState<KnowledgeState>(EMPTY_KNOWLEDGE);
-  const [loading, setLoading] = useState(false);
-  // 他のメンバーの AI ターンが進行中(SSE の chat:start / chat:end で更新)
-  const [remoteBusy, setRemoteBusy] = useState(false);
+// ボード(= 業務)一覧。ボードを選ぶ / 作るとマップ画面(/boards/<id>)へ。
+export default function BoardListPage() {
+  const router = useRouter();
+  const [boards, setBoards] = useState<BoardMeta[]>([]);
   const [ready, setReady] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
-  const [showContexts, setShowContexts] = useState(false);
-  const [restoringId, setRestoringId] = useState<string | null>(null);
-  // ボードの 📌 で選んだストーリー(次のチャット送信の対象として AI に渡す)
-  const [selectedStory, setSelectedStory] = useState<{ storyId: string; text: string } | null>(null);
+  const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // ボード編集の保存はまとめて行う(D&D 連打でリクエストが溢れないよう debounce)
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // SSE 由来の再取得が自分の進行中の操作を上書きしないためのガード
-  const loadingRef = useRef(false);
-
-  // 初回ロード:保存済みセッション + コンテキスト一覧を取得
   useEffect(() => {
-    fetch("/api/session")
+    fetch("/api/boards")
       .then((r) => r.json())
-      .then((s: SessionState) => {
-        setStoryMap(s.storyMap);
-        setMessages(s.messages ?? []);
-        setVersions(s.versions ?? []);
-      })
-      .catch(() => {
-        /* 取得失敗時は初期状態のまま */
-      })
-      .finally(() => setReady(true));
-
-    fetch("/api/contexts")
-      .then((r) => r.json())
-      .then((state: KnowledgeState) => setKnowledge(state))
+      .then((list: BoardMeta[]) => setBoards(list))
       .catch(() => {
         /* 取得失敗時は空のまま */
-      });
-  }, []);
-
-  // 他メンバーの変更を取り込む(自分のチャット送信中・ボード編集の保存待ち中は控える)
-  const refetchSession = useCallback(() => {
-    if (loadingRef.current || saveTimer.current) return;
-    fetch("/api/session")
-      .then((r) => r.json())
-      .then((s: SessionState) => {
-        setStoryMap(s.storyMap);
-        setMessages(s.messages ?? []);
-        setVersions(s.versions ?? []);
       })
-      .catch(() => {
-        /* 失敗時は手元の状態のまま(次のイベントで再試行される) */
-      });
+      .finally(() => setReady(true));
   }, []);
 
-  // SSE でボードの変更を購読(EventSource は切断時に自動再接続する)
-  useEffect(() => {
-    const source = new EventSource("/api/events");
-    source.onmessage = (e) => {
-      let event: BoardEvent;
-      try {
-        event = JSON.parse(e.data) as BoardEvent;
-      } catch {
-        return;
-      }
-      switch (event.type) {
-        case "storymap":
-          refetchSession();
-          break;
-        case "chat:start":
-          setRemoteBusy(true);
-          break;
-        case "chat:end":
-          setRemoteBusy(false);
-          refetchSession();
-          break;
-        case "contexts":
-          fetch("/api/contexts")
-            .then((r) => r.json())
-            .then((state: KnowledgeState) => setKnowledge(state))
-            .catch(() => {
-              /* 失敗時は手元の一覧のまま */
-            });
-          break;
-      }
-    };
-    return () => source.close();
-  }, [refetchSession]);
-
-  // チャット送信 → AI がマップを更新して返す
-  const sendMessage = useCallback(
-    async (text: string) => {
-      // 📌 選択中のストーリーがあれば、対象として明示した上で送る
-      // (会話履歴にも残るので、チームは「どの付箋への指示だったか」を追える)
-      const content = selectedStory
-        ? `【対象ストーリー】「${selectedStory.text}」(id: ${selectedStory.storyId})\n\n${text}`
-        : text;
-      const userMsg: ChatMessage = { role: "user", content };
-      const nextMessages = [...messages, userMsg];
-      setMessages(nextMessages);
-      setSelectedStory(null);
-      setLoading(true);
-      loadingRef.current = true;
-
-      try {
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: nextMessages, storyMap }),
-        });
-        const data = await res.json();
-
-        if (!res.ok) {
-          setMessages((prev) => [
-            ...prev,
-            { role: "assistant", content: `__error__:${data.error ?? "エラーが発生しました"}` },
-          ]);
-          return;
-        }
-
-        const { reply, storyMap: updated, versions: nextVersions } = data as ChatResponse;
-        setStoryMap(updated);
-        setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
-        if (nextVersions) setVersions(nextVersions);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: `__error__:通信に失敗しました (${msg})` },
-        ]);
-      } finally {
-        setLoading(false);
-        loadingRef.current = false;
-      }
-    },
-    [messages, storyMap, selectedStory],
-  );
-
-  // ボードでの直接編集(D&D・追加・削除)→ debounce して保存
-  const updateStoryMap = useCallback((next: StoryMap) => {
-    setStoryMap(next);
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      saveTimer.current = null;
-      fetch("/api/storymap", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(next),
-      }).catch(() => {
-        /* 保存失敗は致命的でないため握りつぶす */
-      });
-    }, 700);
-  }, []);
-
-  // 履歴パネルを開くたびに最新の版一覧へ更新(ボード編集も反映される)
-  const openHistory = useCallback(() => {
-    setShowHistory(true);
-    setShowContexts(false);
-    fetch("/api/versions")
-      .then((r) => r.json())
-      .then((v: StoryMapVersionMeta[]) => setVersions(v))
-      .catch(() => {
-        /* 失敗時は手元の一覧のまま */
-      });
-  }, []);
-
-  const openContexts = useCallback(() => {
-    setShowContexts(true);
-    setShowHistory(false);
-  }, []);
-
-  // 指定の版に復元
-  const restoreVersion = useCallback(async (id: string) => {
-    setRestoringId(id);
+  const create = useCallback(async () => {
+    const trimmed = name.trim();
+    if (!trimmed || creating) return;
+    setCreating(true);
+    setError(null);
     try {
-      const res = await fetch("/api/versions", {
+      const res = await fetch("/api/boards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({ name: trimmed }),
       });
       const data = await res.json();
-      if (res.ok) {
-        setStoryMap(data.storyMap as StoryMap);
-        setVersions(data.versions as StoryMapVersionMeta[]);
+      if (!res.ok) {
+        setError((data.error as string) ?? "作成に失敗しました");
+        return;
       }
-    } catch {
-      /* 失敗時は何もしない */
-    } finally {
-      setRestoringId(null);
-    }
-  }, []);
-
-  // 会話をクリア(マップ・版履歴は保持)
-  const clearChat = useCallback(async () => {
-    setMessages([]);
-    await fetch("/api/messages", { method: "DELETE" }).catch(() => {
-      /* 失敗は握りつぶす */
-    });
-  }, []);
-
-  // ドメイン知識(コンテキスト)の操作
-  const uploadContexts = useCallback(async (files: FileList): Promise<string | null> => {
-    const form = new FormData();
-    for (const file of Array.from(files)) form.append("files", file);
-    try {
-      const res = await fetch("/api/contexts", { method: "POST", body: form });
-      const data = await res.json();
-      if (!res.ok) return (data.error as string) ?? "アップロードに失敗しました";
-      setKnowledge(data as KnowledgeState);
-      return null;
+      router.push(`/boards/${(data as BoardMeta).id}`);
     } catch (e) {
-      return e instanceof Error ? e.message : "アップロードに失敗しました";
+      setError(e instanceof Error ? e.message : "作成に失敗しました");
+    } finally {
+      setCreating(false);
     }
-  }, []);
+  }, [name, creating, router]);
 
-  const toggleContext = useCallback(async (id: string, enabled: boolean) => {
-    // 先に画面へ反映し、失敗したらサーバー状態に合わせ直す
-    setKnowledge((prev) => ({
-      ...prev,
-      sources: prev.sources.map((s) => (s.id === id ? { ...s, enabled } : s)),
-    }));
-    try {
-      const res = await fetch(`/api/contexts/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
-      });
-      if (res.ok) setKnowledge((await res.json()) as KnowledgeState);
-    } catch {
-      /* SSE の contexts イベントで整合される */
-    }
-  }, []);
-
-  const deleteContextDoc = useCallback(async (id: string) => {
-    try {
-      const res = await fetch(`/api/contexts/${id}`, { method: "DELETE" });
-      if (res.ok) setKnowledge((await res.json()) as KnowledgeState);
-    } catch {
-      /* SSE の contexts イベントで整合される */
-    }
-  }, []);
+  const formatTime = (iso: string) => {
+    const d = new Date(iso);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())}`;
+  };
 
   return (
-    <div className="app">
-      <div className="board-area">
-        <header className="app-header">
-          <div>
-            <h1>USM AI Chat</h1>
-            <span className="sub">
-              AI と対話しながら User Story Map を構築・整理
-            </span>
-          </div>
-          <div className="header-buttons">
-            <button className="context-open" onClick={openContexts}>
-              ドメイン知識
-              {knowledge.sources.length > 0
-                ? `(${knowledge.categories.reduce((n, c) => n + c.count, 0)})`
-                : ""}
-            </button>
-            <button className="history-toggle" onClick={openHistory}>
-              版履歴{versions.length > 0 ? `(${versions.length})` : ""}
-            </button>
-          </div>
-        </header>
-        <div className="board-scroll">
-          {ready ? (
-            <PanZoom>
-              <Board
-                storyMap={storyMap}
-                onChange={updateStoryMap}
-                onPickStory={setSelectedStory}
-              />
-            </PanZoom>
-          ) : (
-            <div className="board-empty">読み込み中…</div>
-          )}
-        </div>
-        {showHistory && (
-          <HistoryPanel
-            versions={versions}
-            restoringId={restoringId}
-            onRestore={restoreVersion}
-            onClose={() => setShowHistory(false)}
-          />
-        )}
-        {showContexts && (
-          <ContextPanel
-            knowledge={knowledge}
-            onUpload={uploadContexts}
-            onToggle={toggleContext}
-            onDelete={deleteContextDoc}
-            onClose={() => setShowContexts(false)}
-          />
-        )}
+    <div className="board-list-page">
+      <header className="board-list-header">
+        <h1>USM AI Chat</h1>
+        <span className="sub">業務ごとにボードを作り、AI と対話しながら User Story Map を構築・整理</span>
+      </header>
+
+      <div className="board-create">
+        <input
+          type="text"
+          value={name}
+          placeholder="新しいボード名(例: 送金処理)"
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") create();
+          }}
+        />
+        <button onClick={create} disabled={creating || !name.trim()}>
+          {creating ? "作成中…" : "ボードを作成"}
+        </button>
       </div>
-      <ChatPanel
-        messages={messages}
-        loading={loading}
-        remoteBusy={remoteBusy}
-        selectedStory={selectedStory}
-        onClearSelection={() => setSelectedStory(null)}
-        onSend={sendMessage}
-        onClear={clearChat}
-      />
+      {error && <div className="board-list-error">⚠️ {error}</div>}
+
+      <div className="board-list">
+        {!ready && <div className="board-list-empty">読み込み中…</div>}
+        {ready && boards.length === 0 && (
+          <div className="board-list-empty">
+            まだボードがありません。業務の名前でボードを作成してください。
+          </div>
+        )}
+        {boards.map((b) => (
+          <button
+            key={b.id}
+            className="board-card"
+            onClick={() => router.push(`/boards/${b.id}`)}
+          >
+            <span className="board-card-name">{b.name}</span>
+            <span className="board-card-date">{formatTime(b.createdAt)} 作成</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

@@ -13,10 +13,10 @@ const CATEGORIES: KnowledgeCategory[] = [
 ];
 
 interface Params {
-  params: { category: string };
+  params: { boardId: string; category: string };
 }
 
-// カテゴリの知識(有効ソース由来)を閲覧用 Markdown で返す
+// カテゴリの知識(ボード + 共通、有効ソース由来)を閲覧用 Markdown で返す
 export async function GET(_request: Request, { params }: Params) {
   const category = params.category as KnowledgeCategory;
   if (!CATEGORIES.includes(category)) {
@@ -25,5 +25,5 @@ export async function GET(_request: Request, { params }: Params) {
       { status: 404 },
     );
   }
-  return NextResponse.json(await getCategoryMarkdown(category));
+  return NextResponse.json(await getCategoryMarkdown(params.boardId, category));
 }

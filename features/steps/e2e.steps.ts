@@ -10,7 +10,7 @@ import { UsmWorld, BASE_URL } from "../support/world";
 async function withSave(world: UsmWorld, action: () => Promise<void>) {
   await Promise.all([
     world.page.waitForResponse(
-      (r) => r.url().includes("/api/storymap") && r.request().method() === "PUT",
+      (r) => /\/api\/boards\/[^/]+\/storymap$/.test(r.url()) && r.request().method() === "PUT",
       { timeout: 15_000 },
     ),
     action(),
@@ -30,12 +30,12 @@ function mapWithAction(actorName: string, actionText: string) {
 // ---- 共通 ----
 
 Given("空のボードを開く", async function (this: UsmWorld) {
-  await this.page.goto(BASE_URL);
+  await this.page.goto(`${BASE_URL}/boards/${this.boardId}`);
   await expect(this.page.locator(".backbone")).toBeVisible();
 });
 
 When("ボードを開く", async function (this: UsmWorld) {
-  await this.page.goto(BASE_URL);
+  await this.page.goto(`${BASE_URL}/boards/${this.boardId}`);
   await expect(this.page.locator(".backbone")).toBeVisible();
 });
 
@@ -240,7 +240,7 @@ Then(
 When("会話をクリアする", async function (this: UsmWorld) {
   await Promise.all([
     this.page.waitForResponse(
-      (r) => r.url().includes("/api/messages") && r.request().method() === "DELETE",
+      (r) => /\/api\/boards\/[^/]+\/messages$/.test(r.url()) && r.request().method() === "DELETE",
       { timeout: 15_000 },
     ),
     this.page.locator(".chat-clear").click(),
@@ -256,7 +256,7 @@ When("版 {string} を復元する", async function (this: UsmWorld, summary: st
   const item = this.page.locator(".history-item", { hasText: summary });
   await Promise.all([
     this.page.waitForResponse(
-      (r) => r.url().includes("/api/versions") && r.request().method() === "POST",
+      (r) => /\/api\/boards\/[^/]+\/versions$/.test(r.url()) && r.request().method() === "POST",
       { timeout: 15_000 },
     ),
     item.locator(".history-restore").click(),

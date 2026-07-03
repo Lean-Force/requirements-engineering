@@ -9,13 +9,13 @@ import { emit } from "@/infrastructure/events";
 export const dynamic = "force-dynamic";
 
 interface Params {
-  params: { id: string };
+  params: { boardId: string; id: string };
 }
 
 // ソースから抽出されたエントリの閲覧(出典確認用)
 export async function GET(_request: Request, { params }: Params) {
   try {
-    return NextResponse.json(await getSourceMarkdown(params.id));
+    return NextResponse.json(await getSourceMarkdown(params.boardId, params.id));
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 404 });
@@ -38,8 +38,9 @@ export async function PATCH(request: Request, { params }: Params) {
   }
 
   try {
-    const state = await setSourceEnabled(params.id, body.enabled);
-    emit("contexts");
+    const state = await setSourceEnabled(params.boardId, params.id, body.enabled);
+    // 共通知識の可能性があるため全ボードへ通知する(自ボード分の再取得は無害)
+    emit("*", "contexts");
     return NextResponse.json(state);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -50,8 +51,8 @@ export async function PATCH(request: Request, { params }: Params) {
 // ソースの削除(原資料と抽出済みエントリごと消す)
 export async function DELETE(_request: Request, { params }: Params) {
   try {
-    const state = await deleteSource(params.id);
-    emit("contexts");
+    const state = await deleteSource(params.boardId, params.id);
+    emit("*", "contexts");
     return NextResponse.json(state);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

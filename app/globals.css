@@ -175,3 +175,31 @@ body,html{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
 .kb-category:disabled{opacity:.45;cursor:default}
 .kb-count{font-size:12px;font-weight:600;color:var(--muted);background:var(--panel);border:1px solid var(--border);border-radius:999px;padding:1px 9px}
 .kb-category:hover:not(:disabled) .kb-count{color:var(--accent);border-color:var(--accent)}
+
+/* ---- ボード一覧ページ ------------------------------------------------------ */
+.board-list-page{max-width:720px;margin:0 auto;padding:48px 24px;display:flex;flex-direction:column;gap:20px}
+.board-list-header h1{font-size:22px;margin:0 0 4px}
+.board-list-header .sub{color:var(--muted);font-size:13px}
+.board-create{display:flex;gap:8px}
+.board-create input{flex:1 1 auto;padding:10px 12px;border:1px solid var(--border);border-radius:10px;font-size:14px;background:var(--panel)}
+.board-create input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.board-create button{flex:0 0 auto;padding:10px 18px;font-size:14px;border:1px solid var(--accent);border-radius:10px;background:var(--accent);color:#fff;cursor:pointer}
+.board-create button:disabled{opacity:.5;cursor:not-allowed}
+.board-list-error{color:#b3261e;font-size:13px}
+.board-list{display:flex;flex-direction:column;gap:10px}
+.board-list-empty{color:var(--muted);font-size:13px;line-height:1.7;padding:24px 0}
+.board-card{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--panel);cursor:pointer;text-align:left}
+.board-card:hover{border-color:var(--accent);box-shadow:0 2px 12px rgba(31,36,48,.08)}
+.board-card-name{font-size:15px;font-weight:600;color:var(--text)}
+.board-card-date{font-size:12px;color:var(--muted);flex:0 0 auto}
+
+/* ---- ボード画面ヘッダー(戻るリンク) --------------------------------------- */
+.header-title{display:flex;align-items:center;gap:10px;min-width:0}
+.board-back{flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--muted);text-decoration:none;font-size:15px}
+.board-back:hover{color:var(--accent);border-color:var(--accent)}
+.board-missing{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;height:100vh;color:var(--muted)}
+.board-missing a{color:var(--accent)}
+
+/* ---- 共通知識トグル -------------------------------------------------------- */
+.context-common-toggle{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);cursor:pointer}
+.context-common-toggle input{accent-color:var(--accent)}

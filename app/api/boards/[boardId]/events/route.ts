@@ -4,16 +4,22 @@ import type { BoardEvent } from "@/contracts";
 export const dynamic = "force-dynamic";
 
 // ボード同期用の SSE エンドポイント。
-// 「何かが変わった」ことだけを push し、クライアントは必要なデータを再取得する。
+// このボード宛(または全ボード宛 "*")のイベントだけを流す。
 // ALB 等の idle timeout 対策として定期的にコメント行(keep-alive)を送る。
 const KEEP_ALIVE_MS = 25_000;
 
-export async function GET(request: Request) {
+interface Params {
+  params: { boardId: string };
+}
+
+export async function GET(request: Request, { params }: Params) {
+  const { boardId } = params;
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
     start(controller) {
       const send = (event: BoardEvent) => {
+        if (event.boardId !== boardId && event.boardId !== "*") return;
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
         } catch {
