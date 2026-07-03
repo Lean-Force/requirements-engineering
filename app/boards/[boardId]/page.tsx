@@ -7,6 +7,7 @@ import PanZoom from "@/ui/PanZoom";
 import ChatPanel from "@/ui/ChatPanel";
 import HistoryPanel from "@/ui/HistoryPanel";
 import ContextPanel from "@/ui/ContextPanel";
+import BoardSwitcher from "@/ui/BoardSwitcher";
 import { emptyStoryMap } from "@/domain";
 import type { StoryMap } from "@/domain";
 import type {
@@ -49,6 +50,15 @@ export default function BoardPage({ params }: Props) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // SSE 由来の再取得が自分の進行中の操作を上書きしないためのガード
   const loadingRef = useRef(false);
+
+  // 次回 / を開いたときにこのボードへ直行できるよう控える
+  useEffect(() => {
+    try {
+      localStorage.setItem("usm:lastBoard", boardId);
+    } catch {
+      /* プライベートモード等で失敗しても支障なし */
+    }
+  }, [boardId]);
 
   // 初回ロード:保存済みセッション + 知識ベースを取得
   useEffect(() => {
@@ -314,15 +324,10 @@ export default function BoardPage({ params }: Props) {
       <div className="board-area">
         <header className="app-header">
           <div className="header-title">
-            <Link href="/" className="board-back" title="ボード一覧へ">
-              ←
-            </Link>
-            <div>
-              <h1>{board?.name ?? "…"}</h1>
-              <span className="sub">
-                AI と対話しながら User Story Map を構築・整理
-              </span>
-            </div>
+            <BoardSwitcher current={board} />
+            <span className="sub">
+              AI と対話しながら User Story Map を構築・整理
+            </span>
           </div>
           <div className="header-buttons">
             <button className="context-open" onClick={openContexts}>

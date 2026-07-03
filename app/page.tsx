@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { BoardMeta } from "@/contracts";
 
-// ボード(= 業務)一覧。ボードを選ぶ / 作るとマップ画面(/boards/<id>)へ。
+// エントリページ。ボードがあれば「最後に開いたボード」へ直行し、
+// 無ければ最初のボードの作成フォームを出す(切替はボード画面のプルダウンで行う)。
 export default function BoardListPage() {
   const router = useRouter();
   const [boards, setBoards] = useState<BoardMeta[]>([]);
@@ -16,12 +17,26 @@ export default function BoardListPage() {
   useEffect(() => {
     fetch("/api/boards")
       .then((r) => r.json())
-      .then((list: BoardMeta[]) => setBoards(list))
-      .catch(() => {
-        /* 取得失敗時は空のまま */
+      .then((list: BoardMeta[]) => {
+        if (list.length > 0) {
+          // 最後に開いたボード(無効なら先頭)へ直行
+          let target = list[0].id;
+          try {
+            const last = localStorage.getItem("usm:lastBoard");
+            if (last && list.some((b) => b.id === last)) target = last;
+          } catch {
+            /* localStorage が使えなければ先頭へ */
+          }
+          router.replace(`/boards/${target}`);
+          return;
+        }
+        setBoards(list);
+        setReady(true);
       })
-      .finally(() => setReady(true));
-  }, []);
+      .catch(() => {
+        setReady(true);
+      });
+  }, [router]);
 
   const create = useCallback(async () => {
     const trimmed = name.trim();

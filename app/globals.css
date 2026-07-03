@@ -203,3 +203,23 @@ body,html{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
 /* ---- 共通知識トグル -------------------------------------------------------- */
 .context-common-toggle{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);cursor:pointer}
 .context-common-toggle input{accent-color:var(--accent)}
+
+/* ---- ボード切替プルダウン --------------------------------------------------- */
+.board-switcher{position:relative;min-width:0}
+.board-switcher-btn{display:flex;align-items:center;gap:6px;border:none;background:transparent;padding:2px 6px;margin-left:-6px;border-radius:8px;cursor:pointer;min-width:0}
+.board-switcher-btn:hover{background:var(--accent-soft)}
+.board-switcher-btn h1{margin:0;font-size:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.board-switcher-caret{color:var(--muted);font-size:11px;flex:0 0 auto}
+.board-switcher-backdrop{position:fixed;inset:0;z-index:29}
+.board-switcher-menu{position:absolute;top:calc(100% + 6px);left:0;z-index:30;width:280px;background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 32px rgba(31,36,48,.18);padding:6px;display:flex;flex-direction:column;gap:2px}
+.board-switcher-section{font-size:11px;font-weight:700;color:var(--muted);padding:6px 10px 2px;letter-spacing:.05em}
+.board-switcher-item{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;border:none;border-radius:8px;background:transparent;font-size:13px;color:var(--text);cursor:pointer;text-align:left}
+.board-switcher-item:hover{background:var(--accent-soft)}
+.board-switcher-item.active{font-weight:600}
+.board-switcher-check{width:14px;flex:0 0 auto;color:var(--accent);font-size:12px}
+.board-switcher-empty{padding:8px 10px;font-size:12px;color:var(--muted)}
+.board-switcher-create{display:flex;gap:6px;padding:8px 6px 4px;border-top:1px solid var(--border);margin-top:4px}
+.board-switcher-create input{flex:1 1 auto;min-width:0;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12.5px;background:var(--bg)}
+.board-switcher-create input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.board-switcher-create button{flex:0 0 auto;padding:7px 12px;font-size:12.5px;border:1px solid var(--accent);border-radius:8px;background:var(--accent);color:#fff;cursor:pointer}
+.board-switcher-create button:disabled{opacity:.5;cursor:not-allowed}
