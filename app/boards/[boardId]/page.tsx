@@ -394,6 +394,39 @@ export default function BoardPage({ params }: Props) {
     [api],
   );
 
+  // 資料 1 件のエントリ操作 API(一覧・AI 修正案・保存・削除)
+  const entriesApiFor = useCallback(
+    (sourceId: string) => {
+      const base = `${api}/contexts/${sourceId}/entries`;
+      const call = async (url: string, init?: RequestInit) => {
+        try {
+          const res = await fetch(url, init);
+          const data = await res.json();
+          return res.ok ? data : { error: (data.error as string) ?? "操作に失敗しました" };
+        } catch (e) {
+          return { error: e instanceof Error ? e.message : "操作に失敗しました" };
+        }
+      };
+      return {
+        list: () => call(base),
+        revise: (entryId: string, instruction: string) =>
+          call(`${base}/${entryId}/revise`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ instruction }),
+          }),
+        save: (entryId: string, patch: unknown) =>
+          call(`${base}/${entryId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patch),
+          }),
+        remove: (entryId: string) => call(`${base}/${entryId}`, { method: "DELETE" }),
+      };
+    },
+    [api],
+  );
+
   const loadSourceMarkdown = useCallback(
     async (id: string): Promise<string> => {
       try {
@@ -488,7 +521,8 @@ export default function BoardPage({ params }: Props) {
             onDelete={deleteContextDoc}
             onReextract={reextractContext}
             loadCategory={loadCategoryMarkdown}
-            loadSource={loadSourceMarkdown}
+            entriesApi={entriesApiFor}
+            onEntriesState={setKnowledge}
             onClose={() => setShowContexts(false)}
           />
         )}

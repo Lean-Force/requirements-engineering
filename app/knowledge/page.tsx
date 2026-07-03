@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { KnowledgeState, SourceMeta } from "@/contracts";
+import SourceEntriesViewer from "@/ui/SourceEntriesViewer";
 
 const EMPTY: KnowledgeState = { sources: [], categories: [] };
 
@@ -22,6 +23,8 @@ export default function KnowledgeAdminPage() {
   const [reextracting, setReextracting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [viewer, setViewer] = useState<Viewer | null>(null);
+  // エントリ編集ビューアを開いている資料
+  const [entriesFor, setEntriesFor] = useState<SourceMeta | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const refetch = useCallback(async () => {
@@ -112,20 +115,37 @@ export default function KnowledgeAdminPage() {
     }
   };
 
-  const openSource = async (source: SourceMeta) => {
-    const title = `${source.fileName} からの抽出結果`;
-    setViewer({ title, markdown: null });
-    try {
-      const res = await fetch(`/api/knowledge/${source.id}`);
-      const data = await res.json();
-      setViewer({
-        title,
-        markdown: res.ok ? (data.markdown as string) : `⚠️ ${data.error}`,
-      });
-    } catch {
-      setViewer({ title, markdown: "⚠️ 読み込みに失敗しました" });
-    }
-  };
+  const openSource = (source: SourceMeta) => setEntriesFor(source);
+
+  // 資料 1 件のエントリ操作 API(一覧・AI 修正案・保存・削除)
+  const entriesApiFor = useCallback((sourceId: string) => {
+    const base = `/api/knowledge/${sourceId}/entries`;
+    const call = async (url: string, init?: RequestInit) => {
+      try {
+        const res = await fetch(url, init);
+        const data = await res.json();
+        return res.ok ? data : { error: (data.error as string) ?? "操作に失敗しました" };
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : "操作に失敗しました" };
+      }
+    };
+    return {
+      list: () => call(base),
+      revise: (entryId: string, instruction: string) =>
+        call(`${base}/${entryId}/revise`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ instruction }),
+        }),
+      save: (entryId: string, patch: unknown) =>
+        call(`${base}/${entryId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        }),
+      remove: (entryId: string) => call(`${base}/${entryId}`, { method: "DELETE" }),
+    };
+  }, []);
 
   const { sources, categories } = knowledge;
   const totalEntries = categories.reduce((n, c) => n + c.count, 0);
@@ -227,6 +247,16 @@ export default function KnowledgeAdminPage() {
           </div>
         ))}
       </div>
+
+      {entriesFor && (
+        <SourceEntriesViewer
+          title={entriesFor.fileName}
+          api={entriesApiFor(entriesFor.id)}
+          commonFixed
+          onState={setKnowledge}
+          onClose={() => setEntriesFor(null)}
+        />
+      )}
 
       {viewer && (
         <div className="context-viewer-backdrop" onClick={() => setViewer(null)}>

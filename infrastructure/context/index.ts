@@ -6,11 +6,15 @@
 //   workspace.ts  … データ置き場の解決
 export {
   addSource,
+  deleteEntry,
   deleteSource,
   getCategoryMarkdown,
   getKnowledgeState,
+  getSourceEntries,
   getSourceMarkdown,
+  proposeEntryRevision,
   reextractSource,
+  updateEntry,
   setSourceEnabled,
 } from "./knowledge";
 export { prepareSkillsForChat, renderCommonSkills } from "./skills";

@@ -55,3 +55,19 @@ export const REFINE_SCHEMA: Record<string, unknown> = {
     note: { type: "string", description: "何をなぜ直したかの短い説明(日本語1〜2文)" },
   },
 };
+
+/** エントリ修正案(revise)の構造化出力スキーマ */
+export const ENTRY_REVISE_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["title", "content", "common", "note"],
+  properties: {
+    title: { type: "string" },
+    content: { type: "string" },
+    common: {
+      type: "boolean",
+      description: "true = 業務横断で通用する共通知識",
+    },
+    note: { type: "string", description: "何をどう直したか・原資料との食い違いの指摘(日本語1〜2文)" },
+  },
+};

@@ -9,8 +9,10 @@ import path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const extractMock = vi.fn();
+const reviseMock = vi.fn();
 vi.mock("@/infrastructure/agent", () => ({
   extractKnowledgeMulti: (...args: unknown[]) => extractMock(...args),
+  reviseEntry: (...args: unknown[]) => reviseMock(...args),
 }));
 
 import { createBoard } from "@/infrastructure/boards";

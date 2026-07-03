@@ -24,6 +24,7 @@ import type { HookInput } from "@anthropic-ai/claude-agent-sdk";
 import type {
   ChatMessage,
   ChatResponse,
+  EntryRevision,
   KnowledgeCategory,
   RefineRequest,
   RefineResponse,
@@ -32,6 +33,7 @@ import type { StoryMap } from "@/domain";
 import { dataRoot, workspaceDir } from "../context/workspace";
 import { boardToolsServer } from "./board-tools";
 import {
+  ENTRY_REVISE_SYSTEM_PROMPT,
   EXTRACT_CATEGORY_DEFS,
   EXTRACT_ORCHESTRATOR_PROMPT,
   extractSubagentPrompt,
@@ -39,7 +41,12 @@ import {
   REFINE_SYSTEM_PROMPT,
   SYSTEM_PROMPT,
 } from "./prompts";
-import { CHAT_OUTPUT_SCHEMA, EXTRACT_SCHEMA, REFINE_SCHEMA } from "./schema";
+import {
+  CHAT_OUTPUT_SCHEMA,
+  ENTRY_REVISE_SCHEMA,
+  EXTRACT_SCHEMA,
+  REFINE_SCHEMA,
+} from "./schema";
 
 /** LLM の接続設定があるか(Bedrock / Anthropic API 直結 / ローカル認証のいずれか) */
 export function isConfigured(): boolean {
@@ -405,6 +412,68 @@ export async function extractKnowledgeMulti(
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
+}
+
+// ---- 知識エントリの協働修正 --------------------------------------------------
+
+/**
+ * 知識エントリ 1 件をユーザーの指示に沿って修正する(原資料の全文を根拠として渡す)。
+ * 提案を返すだけで保存はしない(適用はユーザーが決める)。
+ */
+export async function reviseEntry(
+  fileName: string,
+  sourceMarkdown: string,
+  current: { category: KnowledgeCategory; title: string; content: string; common: boolean },
+  instruction: string,
+): Promise<EntryRevision> {
+  await fs.mkdir(dataRoot(), { recursive: true });
+  const q = query({
+    prompt: `# 原資料: ${fileName}
+
+${sourceMarkdown}
+
+# 現在のエントリ(カテゴリ: ${current.category})
+title: ${current.title}
+common: ${current.common}
+content:
+${current.content}
+
+# ユーザーの修正指示
+${instruction}`,
+    options: {
+      model: process.env.ANTHROPIC_MODEL || undefined,
+      cwd: dataRoot(),
+      systemPrompt: ENTRY_REVISE_SYSTEM_PROMPT,
+      settingSources: [],
+      allowedTools: [],
+      maxTurns: 4,
+      outputFormat: { type: "json_schema", schema: ENTRY_REVISE_SCHEMA },
+    },
+  });
+
+  for await (const message of q) {
+    if (message.type !== "result") continue;
+    if (message.subtype === "success") {
+      console.log(
+        JSON.stringify({
+          at: new Date().toISOString(),
+          kind: "entry-revise-usage",
+          fileName,
+          usage: message.usage,
+          costUsd: message.total_cost_usd,
+        }),
+      );
+      const output = message.structured_output as EntryRevision | undefined;
+      if (!output) throw new Error("修正案が得られませんでした");
+      return output;
+    }
+    const errors =
+      "errors" in message && Array.isArray(message.errors)
+        ? message.errors.join(" / ")
+        : message.subtype;
+    throw new Error(`修正案の生成に失敗しました: ${errors}`);
+  }
+  throw new Error("修正案の生成で有効な応答が得られませんでした");
 }
 
 // ---- 内部 ----------------------------------------------------------------

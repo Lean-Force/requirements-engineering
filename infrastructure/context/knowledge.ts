@@ -18,13 +18,15 @@
 // 両論併記で出典を明示する(勝手に統合して情報を落とさない)。
 
 import type {
+  EntryPatch,
+  EntryRevision,
   KnowledgeCategory,
   KnowledgeCategorySummary,
   KnowledgeEntry,
   KnowledgeState,
   SourceMeta,
 } from "@/contracts";
-import { extractKnowledgeMulti } from "../agent";
+import { extractKnowledgeMulti, reviseEntry } from "../agent";
 import { listBoards } from "../boards";
 import { isSupportedFile, parseFile } from "./parse";
 import {
@@ -176,14 +178,16 @@ export async function reextractSource(
     throw new Error(`ドメイン知識を抽出できませんでした: ${meta.fileName}`);
   }
 
-  // このソース由来のエントリを丸ごと差し替える
-  const entries = (await readEntries(scope)).filter(
-    (e) => e.sourceId !== sourceId,
-  );
+  // このソース由来のエントリを差し替える。ただし人が(AI と協働で)直した
+  // エントリ(edited)は再抽出で上書きしない(知識版の確定ロック)。
+  const all = await readEntries(scope);
+  const kept = all.filter((e) => e.sourceId === sourceId && e.edited);
+  const entries = all.filter((e) => e.sourceId !== sourceId);
+  entries.push(...kept);
   for (const e of extracted) {
     entries.push({ id: newId(), sourceId, ...e, common: boardId === null ? true : e.common });
   }
-  meta.entryCount = extracted.length;
+  meta.entryCount = kept.length + extracted.length;
   await writeJson(sourcesFile(scope), sources);
   await writeJson(knowledgeFile(scope), entries);
   await rerender(scope);
@@ -222,6 +226,85 @@ export async function deleteSource(
   await removeSourceDir(scope, sourceId);
   await writeJson(sourcesFile(scope), sources.filter((s) => s.id !== sourceId));
   await writeJson(knowledgeFile(scope), entries);
+  await rerender(scope);
+  return getKnowledgeState(boardId);
+}
+
+// ---- エントリ単位の操作(AI と協働で直す) -----------------------------------
+
+/** ソース 1 件の抽出エントリ一覧(編集 UI 用) */
+export async function getSourceEntries(
+  boardId: string | null,
+  sourceId: string,
+): Promise<{ meta: SourceMeta; entries: KnowledgeEntry[] }> {
+  const scope = ownerScope(boardId);
+  const meta = (await readSources(scope)).find((s) => s.id === sourceId);
+  if (!meta) throw new Error("指定の資料が見つかりません");
+  const entries = (await readEntries(scope)).filter((e) => e.sourceId === sourceId);
+  return { meta, entries };
+}
+
+/**
+ * エントリ 1 件の AI 修正案を作る(保存はしない)。
+ * 原資料の全文を根拠として渡すので、指示が原文と食い違えば note で指摘される。
+ */
+export async function proposeEntryRevision(
+  boardId: string | null,
+  sourceId: string,
+  entryId: string,
+  instruction: string,
+): Promise<EntryRevision> {
+  const scope = ownerScope(boardId);
+  const meta = (await readSources(scope)).find((s) => s.id === sourceId);
+  if (!meta) throw new Error("指定の資料が見つかりません");
+  const entry = (await readEntries(scope)).find(
+    (e) => e.id === entryId && e.sourceId === sourceId,
+  );
+  if (!entry) throw new Error("指定のエントリが見つかりません");
+
+  const buffer = await readOriginal(scope, sourceId, meta.fileName);
+  const markdown = await toMarkdown(meta.fileName, buffer);
+  return reviseEntry(meta.fileName, markdown, entry, instruction);
+}
+
+/** エントリ 1 件を保存する(edited = true になり、以後の再抽出で上書きされない) */
+export async function updateEntry(
+  boardId: string | null,
+  sourceId: string,
+  entryId: string,
+  patch: EntryPatch,
+): Promise<KnowledgeState> {
+  const scope = ownerScope(boardId);
+  const entries = await readEntries(scope);
+  const entry = entries.find((e) => e.id === entryId && e.sourceId === sourceId);
+  if (!entry) throw new Error("指定のエントリが見つかりません");
+  entry.title = patch.title;
+  entry.content = patch.content;
+  // 共通管理画面のエントリは常に共通のまま
+  entry.common = boardId === null ? true : patch.common;
+  entry.edited = true;
+  await writeJson(knowledgeFile(scope), entries);
+  await rerender(scope);
+  return getKnowledgeState(boardId);
+}
+
+/** エントリ 1 件を削除する(資料は残る。entryCount を追従) */
+export async function deleteEntry(
+  boardId: string | null,
+  sourceId: string,
+  entryId: string,
+): Promise<KnowledgeState> {
+  const scope = ownerScope(boardId);
+  const entries = await readEntries(scope);
+  if (!entries.some((e) => e.id === entryId && e.sourceId === sourceId)) {
+    throw new Error("指定のエントリが見つかりません");
+  }
+  const next = entries.filter((e) => e.id !== entryId);
+  const sources = await readSources(scope);
+  const meta = sources.find((s) => s.id === sourceId);
+  if (meta) meta.entryCount = next.filter((e) => e.sourceId === sourceId).length;
+  await writeJson(knowledgeFile(scope), next);
+  await writeJson(sourcesFile(scope), sources);
   await rerender(scope);
   return getKnowledgeState(boardId);
 }

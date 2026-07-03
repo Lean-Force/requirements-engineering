@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { KnowledgeState, SourceMeta } from "@/contracts";
+import SourceEntriesViewer, { type EntriesApi } from "./SourceEntriesViewer";
 
 interface Props {
   knowledge: KnowledgeState;
@@ -12,9 +13,12 @@ interface Props {
   onDelete: (id: string) => void;
   /** 保存済みの原ファイルから知識を再抽出する(エラー文字列を返すと表示) */
   onReextract: (id: string) => Promise<string | null>;
-  /** カテゴリ / ソースの閲覧用 Markdown を取得する(データ取得は親が担う) */
+  /** カテゴリの閲覧用 Markdown を取得する(データ取得は親が担う) */
   loadCategory: (category: string) => Promise<string>;
-  loadSource: (id: string) => Promise<string>;
+  /** 資料 1 件のエントリ操作 API(一覧・AI 修正案・保存・削除) */
+  entriesApi: (sourceId: string) => EntriesApi;
+  /** エントリの保存・削除後の最新状態を反映する */
+  onEntriesState: (state: KnowledgeState) => void;
   onClose: () => void;
 }
 
@@ -31,13 +35,16 @@ export default function ContextPanel({
   onDelete,
   onReextract,
   loadCategory,
-  loadSource,
+  entriesApi,
+  onEntriesState,
   onClose,
 }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewer, setViewer] = useState<Viewer | null>(null);
+  // エントリ編集ビューアを開いている資料
+  const [entriesFor, setEntriesFor] = useState<SourceMeta | null>(null);
   // 再抽出中のソース id
   const [reextracting, setReextracting] = useState<string | null>(null);
 
@@ -69,11 +76,8 @@ export default function ContextPanel({
   };
 
   // ソースから抽出されたエントリを開く(出典確認)
-  const openSource = async (source: SourceMeta) => {
-    const title = `${source.fileName} からの抽出結果`;
-    setViewer({ title, markdown: null });
-    setViewer({ title, markdown: await loadSource(source.id) });
-  };
+  // 資料クリック → エントリ一覧(AI と協働で直せる)
+  const openSource = (source: SourceMeta) => setEntriesFor(source);
 
   const { sources, categories } = knowledge;
   const totalEntries = categories.reduce((n, c) => n + c.count, 0);
@@ -181,6 +185,15 @@ export default function ContextPanel({
         )}
         {sources.map(renderSource)}
       </div>
+
+      {entriesFor && (
+        <SourceEntriesViewer
+          title={entriesFor.fileName}
+          api={entriesApi(entriesFor.id)}
+          onState={onEntriesState}
+          onClose={() => setEntriesFor(null)}
+        />
+      )}
 
       {viewer && (
         <div className="context-viewer-backdrop" onClick={() => setViewer(null)}>

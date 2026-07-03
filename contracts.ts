@@ -103,6 +103,21 @@ export interface KnowledgeEntry {
   sourceId: string;
   /** true = 業務横断の共通知識(AI が抽出時に自動判定し、全ボードから参照される) */
   common: boolean;
+  /** true = 人が(AI と協働で)直したエントリ。再抽出しても上書きされない */
+  edited?: boolean;
+}
+
+/** エントリ編集の保存内容(PATCH /…/entries/[entryId]) */
+export interface EntryPatch {
+  title: string;
+  content: string;
+  common: boolean;
+}
+
+/** AI によるエントリ修正案(POST /…/entries/[entryId]/revise) */
+export interface EntryRevision extends EntryPatch {
+  /** 何をどう直したか・原文との食い違いがあればその指摘(1〜2文) */
+  note: string;
 }
 
 /** カテゴリの一覧表示用サマリ */

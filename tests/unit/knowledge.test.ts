@@ -10,13 +10,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // LLM 抽出をモック(agent モジュールごと差し替え。ゲートウェイの他機能は使わない)
 const extractMock = vi.fn();
+const reviseMock = vi.fn();
 vi.mock("@/infrastructure/agent", () => ({
   extractKnowledgeMulti: (...args: unknown[]) => extractMock(...args),
+  reviseEntry: (...args: unknown[]) => reviseMock(...args),
 }));
 
 import { createBoard } from "@/infrastructure/boards";
 import {
   addSource,
+  deleteEntry,
+  getSourceEntries,
+  proposeEntryRevision,
+  updateEntry,
   deleteSource,
   getCategoryMarkdown,
   getKnowledgeState,
@@ -234,6 +240,86 @@ describe("旧データ(資料単位スコープ)からの移行", () => {
     await expect(fs.access(skillPath("_common", "kb-common-flows"))).rejects.toThrow();
     expect(await prepareSkillsForChat(BOARD)).toEqual(
       expect.arrayContaining(["kb-common-terms"]),
+    );
+  });
+});
+
+describe("エントリ単位の編集(AI 協働)", () => {
+  const seedSource = async () => {
+    extractMock.mockResolvedValue([
+      { category: "flows", title: "承認ルール", content: "1,000万円超は部長承認", common: false },
+      { category: "terms", title: "BSAD", content: "基本設計書の略称", common: true },
+    ]);
+    const state = await addSource(BOARD, "設計書.txt", Buffer.from("原文: 1,000万円超は部長承認"));
+    const { entries } = await getSourceEntries(BOARD, state.sources[0].id);
+    return { sourceId: state.sources[0].id, entries };
+  };
+
+  it("updateEntry: 保存で edited になり skill に反映、common の付け替えもできる", async () => {
+    const { sourceId, entries } = await seedSource();
+    const rule = entries.find((e) => e.title === "承認ルール")!;
+    await updateEntry(BOARD, sourceId, rule.id, {
+      title: "承認ルール(改)",
+      content: "2億円超は役員承認",
+      common: true, // 業務固有 → 共通へ付け替え
+    });
+
+    const saved = (await getSourceEntries(BOARD, sourceId)).entries.find(
+      (e) => e.id === rule.id,
+    )!;
+    expect(saved.edited).toBe(true);
+    expect(saved.common).toBe(true);
+    // 業務固有 skill からは消え、共通 skill に入る
+    await expect(fs.access(skillPath(BOARD, "kb-flows"))).rejects.toThrow();
+    const common = await fs.readFile(skillPath("_common", "kb-common-flows"), "utf-8");
+    expect(common).toContain("2億円超は役員承認");
+  });
+
+  it("再抽出しても edited エントリは上書きされない", async () => {
+    const { sourceId, entries } = await seedSource();
+    const rule = entries.find((e) => e.title === "承認ルール")!;
+    await updateEntry(BOARD, sourceId, rule.id, {
+      title: "承認ルール(人が修正)",
+      content: "2億円超は役員承認",
+      common: false,
+    });
+
+    extractMock.mockResolvedValue([
+      { category: "flows", title: "承認ルール", content: "1,000万円超は部長承認(再抽出)", common: false },
+    ]);
+    const state = await reextractSource(BOARD, sourceId);
+    const after = (await getSourceEntries(BOARD, sourceId)).entries;
+    // 人が直した方は残り、再抽出分も追加される
+    expect(after.some((e) => e.title === "承認ルール(人が修正)")).toBe(true);
+    expect(after.some((e) => e.content.includes("再抽出"))).toBe(true);
+    expect(state.sources[0].entryCount).toBe(after.length);
+  });
+
+  it("deleteEntry: 1 件だけ消えて entryCount と skill が追従する", async () => {
+    const { sourceId, entries } = await seedSource();
+    const bsad = entries.find((e) => e.title === "BSAD")!;
+    const state = await deleteEntry(BOARD, sourceId, bsad.id);
+    expect(state.sources[0].entryCount).toBe(1);
+    await expect(fs.access(skillPath("_common", "kb-common-terms"))).rejects.toThrow();
+    await expect(fs.access(skillPath(BOARD, "kb-flows"))).resolves.toBeUndefined();
+  });
+
+  it("proposeEntryRevision: 原資料の全文・現在のエントリ・指示が AI に渡る", async () => {
+    const { sourceId, entries } = await seedSource();
+    const rule = entries.find((e) => e.title === "承認ルール")!;
+    reviseMock.mockResolvedValue({
+      title: "承認ルール",
+      content: "2億円超は役員承認",
+      common: false,
+      note: "指示に従い閾値を修正。原資料では1,000万円/部長承認となっています。",
+    });
+    const revision = await proposeEntryRevision(BOARD, sourceId, rule.id, "閾値を2億に。承認者は役員。");
+    expect(revision.content).toContain("2億");
+    expect(reviseMock).toHaveBeenCalledWith(
+      "設計書.txt",
+      expect.stringContaining("原文: 1,000万円超は部長承認"),
+      expect.objectContaining({ title: "承認ルール" }),
+      "閾値を2億に。承認者は役員。",
     );
   });
 });
