@@ -72,7 +72,7 @@ export default function ChatPanel({
             <ul>
               <li>「ECサイトを作りたい。商品検索とカート、決済機能が必要」</li>
               <li>「決済にクレジットカードとコンビニ払いを追加して」</li>
-              <li>「カート機能を Release 2 に移して」</li>
+              <li>「支払いの場面に、領収書を受け取るストーリーを足して」</li>
             </ul>
           </div>
         )}

@@ -150,7 +150,7 @@ export default function BoardPage({ params }: Props) {
       .catch(() => {
         /* 失敗時は手元の状態のまま(次のイベントで再試行される) */
       });
-  }, [api]);
+  }, [api, clearHistory]);
 
   // SSE でボードの変更を購読(薄い通知 → 再取得)
   useBoardEvents(api, {
@@ -207,7 +207,7 @@ export default function BoardPage({ params }: Props) {
         loadingRef.current = false;
       }
     },
-    [api, storyMap],
+    [api, storyMap, clearHistory],
   );
 
   // チャット送信 → AI がマップを更新して返す
@@ -292,7 +292,7 @@ export default function BoardPage({ params }: Props) {
         setRestoringId(null);
       }
     },
-    [api],
+    [api, clearHistory],
   );
 
   // 会話をクリア(マップ・版履歴は保持)

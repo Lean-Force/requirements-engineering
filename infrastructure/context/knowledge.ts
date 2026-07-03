@@ -32,7 +32,7 @@ import {
   sourcesFile,
   writeJson,
 } from "./repository";
-import { CATEGORIES, renderCategoryBody, renderSkills, skillName } from "./skills";
+import { CATEGORIES, renderCategoryBody, renderSkills } from "./skills";
 import { COMMON_SCOPE } from "./workspace";
 
 // ---- 読み取り(ボード + 共通のマージ) --------------------------------------
@@ -258,6 +258,3 @@ function summarize(
     ).length,
   }));
 }
-
-// skillName は knowledge の公開 API ではないが、テスト・レンダラ間の整合のため re-export
-export { skillName };
