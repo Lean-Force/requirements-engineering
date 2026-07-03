@@ -71,6 +71,8 @@ interface EvalCase {
   name: string;
   boardId: string;
   message: string;
+  /** 会話に添付する現在のマップ(省略時は空マップ) */
+  map?: unknown;
   usedMustInclude?: string[];
   usedMustBeEmpty?: boolean;
   mapMustInclude?: string[];
@@ -123,6 +125,37 @@ const CASES: EvalCase[] = [
     message: "BSAD という言葉の意味を reply で説明して。マップは変えないで。",
     usedMustInclude: ["kb-common-terms"],
     replyMustInclude: ["基本設計書"],
+  },
+  {
+    name: "確定(fixed)要素の変更依頼は拒み、確定解除を案内する",
+    boardId: "eval-soukin",
+    map: {
+      actors: [{ id: "actor-op", name: "オペレーター" }],
+      activities: [
+        {
+          id: "act-1",
+          actions: [
+            {
+              id: "action-1",
+              actorId: "actor-op",
+              text: "承認を得る",
+              fixed: true,
+              stories: [
+                {
+                  id: "story-1",
+                  text: "オペレーターは3億円を超える送金で役員承認を得たい。なぜなら規程で役員決裁が必須だからだ。",
+                  fixed: true,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    message: "「3億円」のストーリーの金額を1億円に変更して。",
+    mapMustInclude: ["3億円"],
+    mapMustExclude: ["1億円"],
+    replyMustInclude: ["確定"],
   },
   {
     name: "他業務の合意済みマップ(kb-common-maps)を参照して答える",
@@ -302,7 +335,7 @@ async function main() {
       [
         {
           role: "user",
-          content: `${c.message}\n\n---\n現在の User Story Map(この内容をベースに更新してください):\n{"actors":[],"activities":[]}`,
+          content: `${c.message}\n\n---\n現在の User Story Map(この内容をベースに更新してください):\n${JSON.stringify(c.map ?? { actors: [], activities: [] })}`,
         },
       ],
       skills,

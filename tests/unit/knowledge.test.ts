@@ -412,3 +412,16 @@ describe("鮮度(同名資料の更新)と矛盾検出", () => {
     expect(after.conflicts).toHaveLength(0);
   });
 });
+
+describe("矛盾スキャンの失敗耐性", () => {
+  it("検出が失敗しても取り込み自体は成功する(warn のみ)", async () => {
+    extractMock.mockResolvedValue([
+      { category: "flows", title: "A", content: "a", common: false },
+    ]);
+    await addSource(BOARD, "既存.txt", Buffer.from("x"));
+    detectMock.mockRejectedValue(new Error("LLM が落ちた"));
+    const state = await addSource(BOARD, "新規.txt", Buffer.from("y"));
+    expect(state.sources).toHaveLength(2); // 取り込みは成功
+    expect(state.conflicts).toEqual([]);
+  });
+});
