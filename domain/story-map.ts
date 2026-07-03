@@ -8,6 +8,7 @@ import { createActor, type Actor } from "./actor";
 import {
   createActivity,
   actionOf,
+  orderedStories,
   withNewAction,
   mapAction,
   withoutAction,
@@ -45,9 +46,8 @@ export function normalizeStoryMap(map: StoryMap): StoryMap {
   const validIds = new Set(actors.map((a) => a.id));
   const fallbackId = actors[0].id;
 
-  const activities = (map.activities ?? []).map((activity) => ({
-    id: activity.id,
-    actions: (activity.actions ?? []).map((a) => ({
+  const activities = (map.activities ?? []).map((activity) => {
+    const actions = (activity.actions ?? []).map((a) => ({
       id: a.id,
       actorId: validIds.has(a.actorId) ? a.actorId : fallbackId,
       text: a.text,
@@ -59,8 +59,19 @@ export function normalizeStoryMap(map: StoryMap): StoryMap {
         // 確定フラグは true のときだけ保持(JSON を汚さない)
         ...(st.fixed === true ? { fixed: true as const } : {}),
       })),
-    })),
-  }));
+    }));
+    // ストーリー列の表示順: 実在する story id だけを重複なしで保持
+    const validStoryIds = new Set(actions.flatMap((a) => a.stories.map((s) => s.id)));
+    const storyOrder = (activity.storyOrder ?? []).filter(
+      (id, i, arr) =>
+        typeof id === "string" && validStoryIds.has(id) && arr.indexOf(id) === i,
+    );
+    return {
+      id: activity.id,
+      actions,
+      ...(storyOrder.length > 0 ? { storyOrder } : {}),
+    };
+  });
 
   return { actors, activities };
 }
@@ -186,6 +197,48 @@ export function removeStory(
   return mapActivity(map, activityId, (act) =>
     mapAction(act, actionId, (a) => withoutStory(a, storyId)),
   );
+}
+
+/**
+ * ストーリー列(場面)内での表示順の並び替え。所属(行動)と色は変えない。
+ * toIndex は列の表示順(orderedStories の並び)での挿入位置。
+ */
+export function reorderStoryInColumn(
+  map: StoryMap,
+  activityId: string,
+  storyId: string,
+  toIndex: number,
+): StoryMap {
+  const activity = findActivity(map, activityId);
+  if (!activity) return map;
+  const order = orderedStories(activity).map((p) => p.story.id);
+  const from = order.indexOf(storyId);
+  if (from < 0) return map;
+  const insert = from < toIndex ? toIndex - 1 : toIndex;
+  order.splice(from, 1);
+  order.splice(Math.max(0, Math.min(insert, order.length)), 0, storyId);
+  return mapActivity(map, activityId, (act) => ({ ...act, storyOrder: order }));
+}
+
+/**
+ * AI の出力(after)にストーリー列の表示順を引き継ぐ。
+ * storyOrder は AI のスキーマに含めないため、チャットの度にここで復元する
+ * (存在しなくなった id は normalizeStoryMap が掃除する)。
+ */
+export function preserveStoryOrder(before: StoryMap, after: StoryMap): StoryMap {
+  const orders = new Map(
+    before.activities
+      .filter((a) => (a.storyOrder ?? []).length > 0)
+      .map((a) => [a.id, a.storyOrder as string[]]),
+  );
+  if (orders.size === 0) return after;
+  return {
+    ...after,
+    activities: after.activities.map((a) => {
+      const order = orders.get(a.id);
+      return order ? { ...a, storyOrder: order } : a;
+    }),
+  };
 }
 
 /**

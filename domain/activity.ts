@@ -1,11 +1,19 @@
 // エンティティ: Activity(ナラティブフロー上の1単位)。複数アクターの Action を束ねる。
 import { genId } from "./id";
 import { createAction, type Action } from "./action";
+import type { Story } from "./story";
 
 export interface Activity {
   id: string;
   /** この Activity に参加するアクターの行動(複数アクター可) */
   actions: Action[];
+  /**
+   * ストーリー列の表示順(story id の並び)。D&D の並び替えで更新される。
+   * 所属(どの行動の配下か)は変えず、見た目の上下だけを自由にするための
+   * サーバー管理フィールド。AI の入出力スキーマには含めない。
+   * 載っていないストーリーは行動のグループ順で後ろに続く。
+   */
+  storyOrder?: string[];
 }
 
 export function createActivity(): Activity {
@@ -15,6 +23,37 @@ export function createActivity(): Activity {
 /** ある Activity における、指定アクターの Action(無ければ undefined) */
 export function actionOf(activity: Activity, actorId: string): Action | undefined {
   return activity.actions.find((a) => a.actorId === actorId);
+}
+
+/**
+ * ストーリー列の表示順を解決する: storyOrder に載っているものを先に、
+ * 残りは行動のグループ順で。各ストーリーは所属 Action とペアで返す(色・編集用)。
+ */
+export function orderedStories(
+  activity: Activity,
+): { story: Story; action: Action }[] {
+  const byId = new Map<string, { story: Story; action: Action }>();
+  for (const action of activity.actions) {
+    for (const story of action.stories) byId.set(story.id, { story, action });
+  }
+  const pairs: { story: Story; action: Action }[] = [];
+  const seen = new Set<string>();
+  for (const id of activity.storyOrder ?? []) {
+    const hit = byId.get(id);
+    if (hit && !seen.has(id)) {
+      pairs.push(hit);
+      seen.add(id);
+    }
+  }
+  for (const action of activity.actions) {
+    for (const story of action.stories) {
+      if (!seen.has(story.id)) {
+        pairs.push({ story, action });
+        seen.add(story.id);
+      }
+    }
+  }
+  return pairs;
 }
 
 // --- 局所的なふるまい(イミュータブル) ---

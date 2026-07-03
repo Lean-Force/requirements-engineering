@@ -18,7 +18,7 @@ export { createAction } from "./action";
 export { createActivity } from "./activity";
 
 // 問い合わせ
-export { actionOf } from "./activity";
+export { actionOf, orderedStories } from "./activity";
 export { findActivity, findAction } from "./story-map";
 
 // 集約への操作(UI からの唯一の変更入口)
@@ -36,6 +36,8 @@ export {
   renameStory,
   removeStory,
   moveStory,
+  reorderStoryInColumn,
+  preserveStoryOrder,
   setStoryFixed,
   setActionFixed,
   enforceFixed,

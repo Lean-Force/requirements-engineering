@@ -197,11 +197,10 @@ type Activity = StoryMap["activities"][number];
 export default function Board({ storyMap, onChange, onPickStory }: Props) {
   const { actors, activities } = storyMap;
 
-  // ストーリーの D&D 並び替え(同じ行動内の上下 + 別の行動・場面への付け替え)。
+  // ストーリーの D&D 並び替え(同じ列 = 場面内で上下自由。所属・色は変えない)。
   // dropHint はインジケータ表示用(対象カードの上半分 = 前に挿入 / 下半分 = 後ろに挿入)。
   const [draggingStory, setDraggingStory] = useState<{
     activityId: string;
-    actionId: string;
     storyId: string;
   } | null>(null);
   const [dropHint, setDropHint] = useState<{ storyId: string; after: boolean } | null>(null);
@@ -510,10 +509,11 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
                       key={activity.id}
                       style={{ width: COL_W }}
                     >
-                      {/* 上: ストーリーカードを列の先頭から詰めて縦積み。編集中は textarea に差し替え */}
-                      {activity.actions.map((action) => {
+                      {/* 上: ストーリーカードを列の表示順(storyOrder)で縦積み。
+                          D&D は同じ列(場面)内の並び替えのみで、所属(行動)と色は変えない */}
+                      {domain.orderedStories(activity).map(({ story: st, action }, displayIndex) => {
                         const c = colorOf(action.actorId);
-                        return action.stories.map((st, storyIndex) => (
+                        return (
                             <div
                               key={st.id}
                               className={`story-card clickable${st.fixed ? " fixed" : ""}${
@@ -535,7 +535,6 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
                                 e.dataTransfer.effectAllowed = "move";
                                 setDraggingStory({
                                   activityId: activity.id,
-                                  actionId: action.id,
                                   storyId: st.id,
                                 });
                               }}
@@ -546,12 +545,10 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
                                 setTimeout(() => (justDragged.current = false), 150);
                               }}
                               onDragOver={(e) => {
-                                // 並び替えは同じ行動内のみ(別の行動へ落とすと
-                                // アクターが変わり付箋色が変わってしまうため)
+                                // 同じ列(場面)内のみ受け付ける
                                 if (
                                   !draggingStory ||
                                   draggingStory.storyId === st.id ||
-                                  draggingStory.actionId !== action.id ||
                                   draggingStory.activityId !== activity.id
                                 )
                                   return;
@@ -573,18 +570,18 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
                                 if (
                                   !draggingStory ||
                                   draggingStory.storyId === st.id ||
-                                  draggingStory.actionId !== action.id ||
                                   draggingStory.activityId !== activity.id
                                 )
                                   return;
                                 const rect = e.currentTarget.getBoundingClientRect();
                                 const after = e.clientY > rect.top + rect.height / 2;
                                 onChange(
-                                  domain.moveStory(storyMap, draggingStory, {
-                                    activityId: activity.id,
-                                    actionId: action.id,
-                                    index: storyIndex + (after ? 1 : 0),
-                                  }),
+                                  domain.reorderStoryInColumn(
+                                    storyMap,
+                                    activity.id,
+                                    draggingStory.storyId,
+                                    displayIndex + (after ? 1 : 0),
+                                  ),
                                 );
                                 setDraggingStory(null);
                                 setDropHint(null);
@@ -630,7 +627,6 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
                                 </button>
                               )}
                             </div>
-                          ),
                         );
                       })}
 

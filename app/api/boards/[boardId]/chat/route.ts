@@ -5,7 +5,7 @@ import { prepareSkillsForChat } from "@/infrastructure/context/store";
 import { withChatLock } from "@/infrastructure/chat-lock";
 import { emit } from "@/infrastructure/events";
 import { getBoard } from "@/infrastructure/boards";
-import { enforceFixed, normalizeStoryMap } from "@/domain";
+import { enforceFixed, normalizeStoryMap, preserveStoryOrder } from "@/domain";
 import type { StoryMap } from "@/domain";
 import type { ChatMessage, ChatResponse } from "@/contracts";
 
@@ -81,9 +81,13 @@ ${JSON.stringify(currentMap)}`,
       const parsed = await generate(boardId, conversation, skills);
 
       // アクター/actorId のゆれを正規化し、確定(fixed)要素(行動・ストーリー)の
-      // 保護を強制する。復元で要素が再作成される可能性があるため最後にもう一度正規化する。
+      // 保護と、ストーリー列の表示順(storyOrder。AI のスキーマ外)の引き継ぎを行う。
+      // 復元で要素が再作成される可能性があるため最後にもう一度正規化する。
       const updatedMap = normalizeStoryMap(
-        enforceFixed(currentMap, normalizeStoryMap(parsed.storyMap)),
+        preserveStoryOrder(
+          currentMap,
+          enforceFixed(currentMap, normalizeStoryMap(parsed.storyMap)),
+        ),
       );
 
       // この 1 ターンを永続化(マップ更新 + 版追加 + 会話保存)。
