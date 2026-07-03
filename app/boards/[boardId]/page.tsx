@@ -8,10 +8,11 @@ import ChatPanel from "@/ui/ChatPanel";
 import HistoryPanel from "@/ui/HistoryPanel";
 import ContextPanel from "@/ui/ContextPanel";
 import BoardSwitcher from "@/ui/BoardSwitcher";
+import { useBoardEvents } from "@/ui/hooks/useBoardEvents";
+import { useUndoRedo } from "@/ui/hooks/useUndoRedo";
 import { emptyStoryMap } from "@/domain";
 import type { StoryMap } from "@/domain";
 import type {
-  BoardEvent,
   BoardMeta,
   ChatMessage,
   ChatResponse,
@@ -48,23 +49,11 @@ export default function BoardPage({ params }: Props) {
 
   // ボード編集の保存はまとめて行う(D&D 連打でリクエストが溢れないよう debounce)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Undo / Redo(⌘Z / ⇧⌘Z)。ボード直接編集のみ対象。AI ターンや他メンバーの
-  // 変更を取り込んだ時点でクリアする(他人の変更まで巻き戻さないため)。
-  const storyMapRef = useRef<StoryMap>(emptyStoryMap());
-  const undoRef = useRef<StoryMap[]>([]);
-  const redoRef = useRef<StoryMap[]>([]);
-  const clearHistory = () => {
-    undoRef.current = [];
-    redoRef.current = [];
-  };
+
   // SSE 由来の再取得が自分の進行中の操作を上書きしないためのガード
   const loadingRef = useRef(false);
   // ?bootstrap=1 付きで開かれたら、取り込み済み知識から叩き台を自動生成する
   const bootstrapRef = useRef(false);
-
-  useEffect(() => {
-    storyMapRef.current = storyMap;
-  }, [storyMap]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -114,6 +103,37 @@ export default function BoardPage({ params }: Props) {
       });
   }, [api]);
 
+  // マップを反映して debounce 保存する(undo 履歴には触れない)
+  const applyMap = useCallback(
+    (next: StoryMap) => {
+      setStoryMap(next);
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => {
+        saveTimer.current = null;
+        fetch(`${api}/storymap`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(next),
+        }).catch(() => {
+          /* 保存失敗は致命的でないため握りつぶす */
+        });
+      }, 700);
+    },
+    [api],
+  );
+
+  // Undo / Redo(⌘Z / ⇧⌘Z)。ボード直接編集のみ対象。
+  const { track, clear: clearHistory } = useUndoRedo(storyMap, applyMap);
+
+  // ボードでの直接編集(D&D・追加・削除)→ undo 履歴へ積んで保存
+  const updateStoryMap = useCallback(
+    (next: StoryMap) => {
+      track();
+      applyMap(next);
+    },
+    [track, applyMap],
+  );
+
   // 他メンバーの変更を取り込む(自分のチャット送信中・ボード編集の保存待ち中は控える)
   const refetchSession = useCallback(() => {
     if (loadingRef.current || saveTimer.current) return;
@@ -132,39 +152,23 @@ export default function BoardPage({ params }: Props) {
       });
   }, [api]);
 
-  // SSE でボードの変更を購読(EventSource は切断時に自動再接続する)
-  useEffect(() => {
-    const source = new EventSource(`${api}/events`);
-    source.onmessage = (e) => {
-      let event: BoardEvent;
-      try {
-        event = JSON.parse(e.data) as BoardEvent;
-      } catch {
-        return;
-      }
-      switch (event.type) {
-        case "storymap":
-          refetchSession();
-          break;
-        case "chat:start":
-          setRemoteBusy(true);
-          break;
-        case "chat:end":
-          setRemoteBusy(false);
-          refetchSession();
-          break;
-        case "contexts":
-          fetch(`${api}/contexts`)
-            .then((r) => r.json())
-            .then((state: KnowledgeState) => setKnowledge(state))
-            .catch(() => {
-              /* 失敗時は手元の一覧のまま */
-            });
-          break;
-      }
-    };
-    return () => source.close();
-  }, [api, refetchSession]);
+  // SSE でボードの変更を購読(薄い通知 → 再取得)
+  useBoardEvents(api, {
+    onStorymap: refetchSession,
+    onChatStart: () => setRemoteBusy(true),
+    onChatEnd: () => {
+      setRemoteBusy(false);
+      refetchSession();
+    },
+    onContexts: () => {
+      fetch(`${api}/contexts`)
+        .then((r) => r.json())
+        .then((state: KnowledgeState) => setKnowledge(state))
+        .catch(() => {
+          /* 失敗時は手元の一覧のまま */
+        });
+    },
+  });
 
   // チャット送信の共通コア(nextMessages の末尾はユーザー発言)
   const postChat = useCallback(
@@ -248,63 +252,6 @@ export default function BoardPage({ params }: Props) {
       );
     }
   }, [ready, messages.length, sendMessage]);
-
-  // マップを反映して debounce 保存する(undo 履歴には触れない)
-  const applyMap = useCallback(
-    (next: StoryMap) => {
-      setStoryMap(next);
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => {
-        saveTimer.current = null;
-        fetch(`${api}/storymap`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(next),
-        }).catch(() => {
-          /* 保存失敗は致命的でないため握りつぶす */
-        });
-      }, 700);
-    },
-    [api],
-  );
-
-  // ボードでの直接編集(D&D・追加・削除)→ undo 履歴へ積んで保存
-  const updateStoryMap = useCallback(
-    (next: StoryMap) => {
-      undoRef.current.push(storyMapRef.current);
-      if (undoRef.current.length > 50) undoRef.current.shift();
-      redoRef.current = [];
-      applyMap(next);
-    },
-    [applyMap],
-  );
-
-  // ⌘Z / ⇧⌘Z(入力中・モーダル編集中は無効)
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
-      const t = e.target as HTMLElement | null;
-      if (
-        t &&
-        (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)
-      )
-        return;
-      e.preventDefault();
-      if (e.shiftKey) {
-        const next = redoRef.current.pop();
-        if (!next) return;
-        undoRef.current.push(storyMapRef.current);
-        applyMap(next);
-      } else {
-        const prev = undoRef.current.pop();
-        if (!prev) return;
-        redoRef.current.push(storyMapRef.current);
-        applyMap(prev);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [applyMap]);
 
   // 履歴パネルを開くたびに最新の版一覧へ更新(ボード編集も反映される)
   const openHistory = useCallback(() => {
@@ -411,6 +358,37 @@ export default function BoardPage({ params }: Props) {
     [api],
   );
 
+  // 閲覧用 Markdown の取得(失敗時はエラーメッセージ文字列を返す = パネルはそのまま表示)
+  const loadCategoryMarkdown = useCallback(
+    async (category: string): Promise<string> => {
+      try {
+        const res = await fetch(`${api}/contexts/knowledge/${category}`);
+        const data = await res.json();
+        return res.ok
+          ? (data.markdown as string)
+          : `⚠️ ${data.error ?? "読み込みに失敗しました"}`;
+      } catch {
+        return "⚠️ 読み込みに失敗しました";
+      }
+    },
+    [api],
+  );
+
+  const loadSourceMarkdown = useCallback(
+    async (id: string): Promise<string> => {
+      try {
+        const res = await fetch(`${api}/contexts/${id}`);
+        const data = await res.json();
+        return res.ok
+          ? (data.markdown as string)
+          : `⚠️ ${data.error ?? "読み込みに失敗しました"}`;
+      } catch {
+        return "⚠️ 読み込みに失敗しました";
+      }
+    },
+    [api],
+  );
+
   const deleteContextDoc = useCallback(
     async (id: string) => {
       try {
@@ -484,11 +462,12 @@ export default function BoardPage({ params }: Props) {
           <ContextPanel
             knowledge={knowledge}
             boardName={board?.name ?? "このボード"}
-            apiBase={api}
             onUpload={uploadContexts}
             onToggle={toggleContext}
             onDelete={deleteContextDoc}
             onReextract={reextractContext}
+            loadCategory={loadCategoryMarkdown}
+            loadSource={loadSourceMarkdown}
             onClose={() => setShowContexts(false)}
           />
         )}

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getKnowledgeState, addSource } from "@/infrastructure/context/store";
+import { getKnowledgeState, addSource } from "@/infrastructure/context";
 import { emit } from "@/infrastructure/events";
 import { getBoard } from "@/infrastructure/boards";
 

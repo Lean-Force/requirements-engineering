@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { isConfigured, generate } from "@/infrastructure/agent";
 import { loadStoryMap, applyChatTurn } from "@/infrastructure/storage";
-import { prepareSkillsForChat } from "@/infrastructure/context/store";
+import { prepareSkillsForChat } from "@/infrastructure/context";
 import { withChatLock } from "@/infrastructure/chat-lock";
 import { emit } from "@/infrastructure/events";
 import { getBoard } from "@/infrastructure/boards";
-import { enforceFixed, normalizeStoryMap, preserveStoryOrder } from "@/domain";
+import { applyAiUpdate } from "@/domain";
 import type { StoryMap } from "@/domain";
 import type { ChatMessage, ChatResponse } from "@/contracts";
 
@@ -80,15 +80,9 @@ ${JSON.stringify(currentMap)}`,
       const skills = await prepareSkillsForChat(boardId);
       const parsed = await generate(boardId, conversation, skills);
 
-      // アクター/actorId のゆれを正規化し、確定(fixed)要素(行動・ストーリー)の
-      // 保護と、ストーリー列の表示順(storyOrder。AI のスキーマ外)の引き継ぎを行う。
-      // 復元で要素が再作成される可能性があるため最後にもう一度正規化する。
-      const updatedMap = normalizeStoryMap(
-        preserveStoryOrder(
-          currentMap,
-          enforceFixed(currentMap, normalizeStoryMap(parsed.storyMap)),
-        ),
-      );
+      // AI 出力を保存してよい形へ整える(正規化・確定要素の保護・表示順の引き継ぎ)。
+      // 手順の順序は domain.applyAiUpdate に閉じている。
+      const updatedMap = applyAiUpdate(currentMap, parsed.storyMap);
 
       // この 1 ターンを永続化(マップ更新 + 版追加 + 会話保存)。
       const fullConversation: ChatMessage[] = [

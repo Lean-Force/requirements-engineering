@@ -7,13 +7,14 @@ interface Props {
   knowledge: KnowledgeState;
   /** ボード名(アップロード先の表示に使う) */
   boardName: string;
-  /** API のベースパス(例: /api/boards/<id>) */
-  apiBase: string;
   onUpload: (files: FileList, common: boolean) => Promise<string | null>;
   onToggle: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
   /** 保存済みの原ファイルから知識を再抽出する(エラー文字列を返すと表示) */
   onReextract: (id: string) => Promise<string | null>;
+  /** カテゴリ / ソースの閲覧用 Markdown を取得する(データ取得は親が担う) */
+  loadCategory: (category: string) => Promise<string>;
+  loadSource: (id: string) => Promise<string>;
   onClose: () => void;
 }
 
@@ -25,11 +26,12 @@ interface Viewer {
 export default function ContextPanel({
   knowledge,
   boardName,
-  apiBase,
   onUpload,
   onToggle,
   onDelete,
   onReextract,
+  loadCategory,
+  loadSource,
   onClose,
 }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
@@ -65,36 +67,14 @@ export default function ContextPanel({
   // 知識カテゴリの内容を開く
   const openCategory = async (category: string, label: string) => {
     setViewer({ title: label, markdown: null });
-    try {
-      const res = await fetch(`${apiBase}/contexts/knowledge/${category}`);
-      const data = await res.json();
-      setViewer({
-        title: label,
-        markdown: res.ok
-          ? (data.markdown as string)
-          : `⚠️ ${data.error ?? "読み込みに失敗しました"}`,
-      });
-    } catch {
-      setViewer({ title: label, markdown: "⚠️ 読み込みに失敗しました" });
-    }
+    setViewer({ title: label, markdown: await loadCategory(category) });
   };
 
   // ソースから抽出されたエントリを開く(出典確認)
   const openSource = async (source: SourceMeta) => {
     const title = `${source.fileName} からの抽出結果`;
     setViewer({ title, markdown: null });
-    try {
-      const res = await fetch(`${apiBase}/contexts/${source.id}`);
-      const data = await res.json();
-      setViewer({
-        title,
-        markdown: res.ok
-          ? (data.markdown as string)
-          : `⚠️ ${data.error ?? "読み込みに失敗しました"}`,
-      });
-    } catch {
-      setViewer({ title, markdown: "⚠️ 読み込みに失敗しました" });
-    }
+    setViewer({ title, markdown: await loadSource(source.id) });
   };
 
   const { sources, categories } = knowledge;

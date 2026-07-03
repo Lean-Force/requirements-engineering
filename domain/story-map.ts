@@ -7,8 +7,6 @@
 import { createActor, type Actor } from "./actor";
 import {
   createActivity,
-  actionOf,
-  orderedStories,
   withNewAction,
   mapAction,
   withoutAction,
@@ -23,7 +21,6 @@ import {
   withStoryFixed,
   type Action,
 } from "./action";
-import type { Story } from "./story";
 
 export interface StoryMap {
   actors: Actor[];
@@ -90,8 +87,8 @@ export function findAction(
   return findActivity(map, activityId)?.actions.find((a) => a.id === actionId);
 }
 
-// 指定 Activity を関数で更新する内部ヘルパ
-function mapActivity(
+// 指定 Activity を関数で更新するヘルパ(兄弟モジュール ordering からも使う)
+export function mapActivity(
   map: StoryMap,
   activityId: string,
   fn: (activity: Activity) => Activity,
@@ -199,106 +196,6 @@ export function removeStory(
   );
 }
 
-/**
- * ストーリー列(場面)内での表示順の並び替え。所属(行動)と色は変えない。
- * toIndex は列の表示順(orderedStories の並び)での挿入位置。
- */
-export function reorderStoryInColumn(
-  map: StoryMap,
-  activityId: string,
-  storyId: string,
-  toIndex: number,
-): StoryMap {
-  const activity = findActivity(map, activityId);
-  if (!activity) return map;
-  const order = orderedStories(activity).map((p) => p.story.id);
-  const from = order.indexOf(storyId);
-  if (from < 0) return map;
-  const insert = from < toIndex ? toIndex - 1 : toIndex;
-  order.splice(from, 1);
-  order.splice(Math.max(0, Math.min(insert, order.length)), 0, storyId);
-  return mapActivity(map, activityId, (act) => ({ ...act, storyOrder: order }));
-}
-
-/**
- * AI の出力(after)にストーリー列の表示順を引き継ぐ。
- * storyOrder は AI のスキーマに含めないため、チャットの度にここで復元する
- * (存在しなくなった id は normalizeStoryMap が掃除する)。
- */
-export function preserveStoryOrder(before: StoryMap, after: StoryMap): StoryMap {
-  const orders = new Map(
-    before.activities
-      .filter((a) => (a.storyOrder ?? []).length > 0)
-      .map((a) => [a.id, a.storyOrder as string[]]),
-  );
-  if (orders.size === 0) return after;
-  return {
-    ...after,
-    activities: after.activities.map((a) => {
-      const order = orders.get(a.id);
-      return order ? { ...a, storyOrder: order } : a;
-    }),
-  };
-}
-
-/**
- * ストーリーを移動する(同じ行動内の並び替え / 別の行動・場面への付け替え)。
- * toIndex は「移動先の行動の stories 配列に挿入する位置」。
- * 対象が見つからない場合は何もしない。
- */
-export function moveStory(
-  map: StoryMap,
-  from: { activityId: string; actionId: string; storyId: string },
-  to: { activityId: string; actionId: string; index: number },
-): StoryMap {
-  const source = findAction(map, from.activityId, from.actionId);
-  const story = source?.stories.find((s) => s.id === from.storyId);
-  if (!source || !story) return map;
-  if (!findAction(map, to.activityId, to.actionId)) return map;
-
-  // 同一行動内の並び替えは、取り除いた分だけ挿入位置を詰める
-  const sameAction = from.actionId === to.actionId && from.activityId === to.activityId;
-  const removeIndex = source.stories.findIndex((s) => s.id === from.storyId);
-  const insertIndex =
-    sameAction && removeIndex < to.index ? to.index - 1 : to.index;
-
-  // 取り除く
-  const removed: StoryMap = {
-    ...map,
-    activities: map.activities.map((act) =>
-      act.id !== from.activityId
-        ? act
-        : {
-            ...act,
-            actions: act.actions.map((a) =>
-              a.id !== from.actionId
-                ? a
-                : { ...a, stories: a.stories.filter((s) => s.id !== from.storyId) },
-            ),
-          },
-    ),
-  };
-
-  // 挿入する
-  return {
-    ...removed,
-    activities: removed.activities.map((act) =>
-      act.id !== to.activityId
-        ? act
-        : {
-            ...act,
-            actions: act.actions.map((a) => {
-              if (a.id !== to.actionId) return a;
-              const stories = [...a.stories];
-              const at = Math.max(0, Math.min(insertIndex, stories.length));
-              stories.splice(at, 0, { ...story });
-              return { ...a, stories };
-            }),
-          },
-    ),
-  };
-}
-
 /** ストーリーの確定(fix)状態を切り替える */
 export function setStoryFixed(
   map: StoryMap,
@@ -323,196 +220,3 @@ export function setActionFixed(
     mapAction(act, actionId, (a) => withActionFixed(a, fixed)),
   );
 }
-
-/**
- * 確定(fixed)要素の保護を強制する純粋関数(サーバー側の最終防衛線)。
- * AI の出力(after)が確定済みの行動・ストーリーを変更・削除していた場合、
- * 変更前(before)の内容へ復元する。先に行動を復元してからストーリーを復元する
- * (消された行動が戻れば、その配下の確定ストーリーの復元先も戻るため)。
- */
-export function enforceFixed(before: StoryMap, after: StoryMap): StoryMap {
-  return enforceFixedStories(before, enforceFixedActions(before, after));
-}
-
-/**
- * 確定(fixed)行動(バックボーンの付箋)の保護。
- * 本文・アクター・確定フラグを守る(別アクティビティへの移動は許容)。
- * 消されていた場合は元のアクティビティへ配下ストーリーごと復元する。
- */
-export function enforceFixedActions(before: StoryMap, after: StoryMap): StoryMap {
-  const fixedActions: { action: Action; activity: Activity }[] = [];
-  for (const activity of before.activities) {
-    for (const action of activity.actions) {
-      if (action.fixed === true) fixedActions.push({ action, activity });
-    }
-  }
-  if (fixedActions.length === 0) return after;
-
-  let result = after;
-  for (const { action, activity } of fixedActions) {
-    result = restoreFixedAction(result, action, activity);
-  }
-  return result;
-}
-
-function restoreFixedAction(
-  map: StoryMap,
-  original: Action,
-  originalActivity: Activity,
-): StoryMap {
-  // 出力側のどこかに残っているか探す(移動は許容し、本文・アクター・フラグだけ守る)
-  for (const activity of map.activities) {
-    const found = activity.actions.find((a) => a.id === original.id);
-    if (found) {
-      return {
-        ...map,
-        activities: map.activities.map((act) =>
-          act.id !== activity.id
-            ? act
-            : {
-                ...act,
-                actions: act.actions.map((a) =>
-                  a.id !== original.id
-                    ? a
-                    : {
-                        ...a,
-                        text: original.text,
-                        actorId: original.actorId,
-                        fixed: true,
-                      },
-                ),
-              },
-        ),
-      };
-    }
-  }
-
-  // 消されていた場合: 元の activity → 無ければ activity ごと末尾に復元(配下ストーリーごと)
-  const revived: Action = { ...original, stories: original.stories.map((s) => ({ ...s })) };
-  const sameActivity = map.activities.find((a) => a.id === originalActivity.id);
-  if (sameActivity) {
-    return {
-      ...map,
-      activities: map.activities.map((act) =>
-        act.id !== originalActivity.id
-          ? act
-          : { ...act, actions: [...act.actions, revived] },
-      ),
-    };
-  }
-  return {
-    ...map,
-    activities: [...map.activities, { ...originalActivity, actions: [revived] }],
-  };
-}
-
-/**
- * 確定(fixed)ストーリーの保護を強制する純粋関数。
- * AI の出力(after)が確定ストーリーを変更・削除していた場合、変更前(before)の
- * 内容へ復元する。プロンプトでの指示に加えた、サーバー側の最終防衛線。
- *
- * 復元先は「同じ action」→ 無ければ「同じ activity に元の action を再作成」→
- * それも無ければ「元の activity ごと末尾に再作成」の順で探す。
- */
-export function enforceFixedStories(before: StoryMap, after: StoryMap): StoryMap {
-  // before 側の確定ストーリーと、その居場所を控える
-  const fixedStories: {
-    story: Story;
-    activity: Activity;
-    action: Action;
-  }[] = [];
-  for (const activity of before.activities) {
-    for (const action of activity.actions) {
-      for (const story of action.stories) {
-        if (story.fixed === true) fixedStories.push({ story, activity, action });
-      }
-    }
-  }
-  if (fixedStories.length === 0) return after;
-
-  let result = after;
-  for (const { story, activity, action } of fixedStories) {
-    result = restoreFixedStory(result, story, activity, action);
-  }
-  return result;
-}
-
-function restoreFixedStory(
-  map: StoryMap,
-  original: Story,
-  originalActivity: Activity,
-  originalAction: Action,
-): StoryMap {
-  // 出力側のどこかに残っているか探す(移動は許容し、内容と確定フラグだけ守る)
-  for (const activity of map.activities) {
-    for (const action of activity.actions) {
-      if (action.stories.some((s) => s.id === original.id)) {
-        return {
-          ...map,
-          activities: map.activities.map((act) =>
-            act.id !== activity.id
-              ? act
-              : {
-                  ...act,
-                  actions: act.actions.map((a) =>
-                    a.id !== action.id
-                      ? a
-                      : {
-                          ...a,
-                          stories: a.stories.map((s) =>
-                            s.id === original.id ? { ...original } : s,
-                          ),
-                        },
-                  ),
-                },
-          ),
-        };
-      }
-    }
-  }
-
-  // 消されていた場合: 元の action → 元の activity → マップ末尾の順で復元する
-  const targetActivity = map.activities.find((a) =>
-    a.actions.some((ac) => ac.id === originalAction.id),
-  );
-  if (targetActivity) {
-    return {
-      ...map,
-      activities: map.activities.map((act) =>
-        act.id !== targetActivity.id
-          ? act
-          : {
-              ...act,
-              actions: act.actions.map((a) =>
-                a.id !== originalAction.id
-                  ? a
-                  : { ...a, stories: [...a.stories, { ...original }] },
-              ),
-            },
-      ),
-    };
-  }
-
-  const revivedAction: Action = { ...originalAction, stories: [{ ...original }] };
-  const sameActivity = map.activities.find((a) => a.id === originalActivity.id);
-  if (sameActivity) {
-    return {
-      ...map,
-      activities: map.activities.map((act) =>
-        act.id !== originalActivity.id
-          ? act
-          : { ...act, actions: [...act.actions, revivedAction] },
-      ),
-    };
-  }
-
-  return {
-    ...map,
-    activities: [
-      ...map.activities,
-      { ...originalActivity, actions: [revivedAction] },
-    ],
-  };
-}
-
-export { actionOf };

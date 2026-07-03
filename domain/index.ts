@@ -35,10 +35,15 @@ export {
   addStory,
   renameStory,
   removeStory,
-  moveStory,
-  reorderStoryInColumn,
-  preserveStoryOrder,
   setStoryFixed,
   setActionFixed,
-  enforceFixed,
 } from "./story-map";
+
+// 並び・移動のポリシー
+export { moveStory, reorderStoryInColumn, preserveStoryOrder } from "./ordering";
+
+// 確定(fixed)要素の保護ポリシー
+export { enforceFixed } from "./fixed";
+
+// AI 出力の取り込みパイプライン(normalize → enforceFixed → preserveStoryOrder → normalize)
+export { applyAiUpdate } from "./ai-update";

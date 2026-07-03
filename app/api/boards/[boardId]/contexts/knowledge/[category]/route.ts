@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCategoryMarkdown } from "@/infrastructure/context/store";
+import { getCategoryMarkdown } from "@/infrastructure/context";
 import type { KnowledgeCategory } from "@/contracts";
 
 export const dynamic = "force-dynamic";

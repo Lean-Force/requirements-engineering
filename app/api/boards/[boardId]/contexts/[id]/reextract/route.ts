@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { reextractSource } from "@/infrastructure/context/store";
+import { reextractSource } from "@/infrastructure/context";
 import { emit } from "@/infrastructure/events";
 
 export const dynamic = "force-dynamic";
