@@ -544,7 +544,15 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
                                 setTimeout(() => (justDragged.current = false), 150);
                               }}
                               onDragOver={(e) => {
-                                if (!draggingStory || draggingStory.storyId === st.id) return;
+                                // 並び替えは同じ行動内のみ(別の行動へ落とすと
+                                // アクターが変わり付箋色が変わってしまうため)
+                                if (
+                                  !draggingStory ||
+                                  draggingStory.storyId === st.id ||
+                                  draggingStory.actionId !== action.id ||
+                                  draggingStory.activityId !== activity.id
+                                )
+                                  return;
                                 e.preventDefault();
                                 e.dataTransfer.dropEffect = "move";
                                 const rect = e.currentTarget.getBoundingClientRect();
@@ -560,7 +568,13 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
                               }
                               onDrop={(e) => {
                                 e.preventDefault();
-                                if (!draggingStory || draggingStory.storyId === st.id) return;
+                                if (
+                                  !draggingStory ||
+                                  draggingStory.storyId === st.id ||
+                                  draggingStory.actionId !== action.id ||
+                                  draggingStory.activityId !== activity.id
+                                )
+                                  return;
                                 const rect = e.currentTarget.getBoundingClientRect();
                                 const after = e.clientY > rect.top + rect.height / 2;
                                 onChange(
