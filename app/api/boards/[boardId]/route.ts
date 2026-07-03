@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { renameBoard, deleteBoard } from "@/infrastructure/boards";
-import { renderCommonSkills } from "@/infrastructure/context";
+import {
+  removeBoardMapKnowledge,
+  renderCommonMapsSkill,
+  renderCommonSkills,
+} from "@/infrastructure/context";
 import { emit } from "@/infrastructure/events";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +24,9 @@ export async function PATCH(request: Request, { params }: Params) {
 
   try {
     const board = await renameBoard(params.boardId, body.name ?? "");
+    // kb-common-maps の見出しは業務名なので作り直す
+    await renderCommonMapsSkill();
+    emit("*", "contexts");
     return NextResponse.json(board);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -34,6 +41,7 @@ export async function DELETE(_request: Request, { params }: Params) {
   try {
     await deleteBoard(params.boardId);
     await renderCommonSkills();
+    await removeBoardMapKnowledge(params.boardId);
     emit("*", "contexts");
     return NextResponse.json({ ok: true });
   } catch (err: unknown) {

@@ -18,6 +18,7 @@ import type {
 import type { StoryMapRepository } from "./repository";
 import { FileStoryMapRepository } from "./file-repository";
 import { workspaceDir } from "../context/workspace";
+import { renderMapKnowledge } from "../context/map-skills";
 
 export type { StoryMapRepository } from "./repository";
 export { FileStoryMapRepository } from "./file-repository";
@@ -105,6 +106,8 @@ export async function saveStoryMap(
   pushVersion(s, source, summary, normalized);
   s.storyMap = normalized;
   await r.saveSession(s);
+  // マップも知識(kb-map / kb-common-maps)なので、保存のたびにビューを作り直す
+  await renderMapKnowledge(boardId, normalized);
   return s.versions.map(toMeta);
 }
 
@@ -122,6 +125,7 @@ export async function applyChatTurn(
   s.storyMap = normalized;
   s.messages = messages.slice(-MAX_MESSAGES);
   await r.saveSession(s);
+  await renderMapKnowledge(boardId, normalized);
   return { storyMap: s.storyMap, versions: s.versions.map(toMeta) };
 }
 
@@ -153,5 +157,6 @@ export async function restoreVersion(
   }
   s.storyMap = target.storyMap;
   await r.saveSession(s);
+  await renderMapKnowledge(boardId, target.storyMap);
   return { storyMap: s.storyMap, versions: s.versions.map(toMeta) };
 }

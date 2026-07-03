@@ -22,6 +22,8 @@ import {
   writeJson,
 } from "../../infrastructure/context/repository";
 import { renderCommonSkills, renderSkills, prepareSkillsForChat } from "../../infrastructure/context/skills";
+import { saveStoryMap } from "../../infrastructure/storage";
+import { writeJson } from "../../infrastructure/context/repository";
 import { COMMON_SCOPE } from "../../infrastructure/context/workspace";
 import type { KnowledgeCategory } from "../../contracts";
 
@@ -122,6 +124,14 @@ const CASES: EvalCase[] = [
     usedMustInclude: ["kb-common-terms"],
     replyMustInclude: ["基本設計書"],
   },
+  {
+    name: "他業務の合意済みマップ(kb-common-maps)を参照して答える",
+    boardId: "eval-koza",
+    message:
+      "「送金処理」の業務で確定(チーム合意)済みになっている承認まわりの決定があれば、reply で教えて。マップは変えないで。",
+    usedMustInclude: ["kb-common-maps"],
+    replyMustInclude: ["役員"],
+  },
 ];
 
 // ---- 実行 -------------------------------------------------------------------
@@ -148,6 +158,36 @@ async function main() {
     { category: "flows", title: "承認の全社標準", content: "500万円を超える取引は部長承認が必要(全社標準)。" },
     { category: "terms", title: "BSAD", content: "BSAD は基本設計書の社内略称。" },
   ]);
+
+  // 送金業務の「確定済みマップ」(kb-common-maps 経由で他業務から見える)。
+  // 知識シード(1,000万/部長)とは別の事実(3億/役員)にして、マップ由来と判別できるようにする
+  await writeJson(path.join(tmp, "boards.json"), [
+    { id: "eval-soukin", name: "送金処理", createdAt: "2026-01-01T00:00:00.000Z" },
+    { id: "eval-koza", name: "口座開設", createdAt: "2026-01-01T00:00:00.000Z" },
+  ]);
+  await saveStoryMap("eval-soukin", {
+    actors: [{ id: "actor-op", name: "オペレーター" }],
+    activities: [
+      {
+        id: "act-approve",
+        actions: [
+          {
+            id: "action-approve",
+            actorId: "actor-op",
+            text: "承認を得る",
+            fixed: true,
+            stories: [
+              {
+                id: "story-approve",
+                text: "オペレーターは3億円を超える送金で役員承認を得たい。なぜなら規程で役員決裁が必須だからだ。",
+                fixed: true,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
 
   let failed = 0;
 

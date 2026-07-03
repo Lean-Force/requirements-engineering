@@ -14,4 +14,9 @@ export {
   setSourceEnabled,
 } from "./knowledge";
 export { prepareSkillsForChat, renderCommonSkills } from "./skills";
+export {
+  boardMapSkillNames,
+  removeBoardMapKnowledge,
+  renderCommonMapsSkill,
+} from "./map-skills";
 export { COMMON_SCOPE, dataRoot, workspaceDir } from "./workspace";
