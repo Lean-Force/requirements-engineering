@@ -15,7 +15,7 @@
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
-import { extractKnowledge, extractKnowledgeMulti, generate } from "../../infrastructure/agent";
+import { detectConflicts, extractKnowledge, extractKnowledgeMulti, generate } from "../../infrastructure/agent";
 import {
   knowledgeFile,
   sourcesFile,
@@ -262,6 +262,38 @@ async function main() {
     }
   }
 
+  // ---- 矛盾検出: 実質的な食い違いだけを拾う(補完関係は拾わない) ---------------
+  {
+    const started = Date.now();
+    const conflicts = await detectConflicts(
+      "新規程.xlsx",
+      [
+        "送金の承認ルール: 2億円を超える送金は役員承認が必要。",
+        "手数料区分: SHA / OUR / BEN のいずれか。",
+      ].join("\n"),
+      [
+        "[出典: 旧規程.xlsx] 送金の承認ルール: 1,000万円を超える送金は部長承認が必要。",
+        "[出典: 用語集.xlsx] BSAD: 基本設計書の社内略称。",
+      ].join("\n"),
+    );
+    const problems: string[] = [];
+    const hit = conflicts.find((c) => c.existingSource.includes("旧規程"));
+    if (!hit) problems.push("承認閾値の矛盾(旧規程)が検出されていない");
+    else if (!`${hit.newClaim}${hit.existingClaim}`.includes("役員") )
+      problems.push("矛盾の主張に具体的な内容(役員承認)が含まれていない");
+    if (conflicts.some((c) => c.existingSource.includes("用語集")))
+      problems.push("無関係な用語集との誤検出(false positive)がある");
+    const secs = Math.round((Date.now() - started) / 1000);
+    if (problems.length === 0) {
+      console.log(`✅ PASS (${secs}s) 矛盾検出: 実質的な食い違いのみを拾う`);
+    } else {
+      failed++;
+      console.log(`❌ FAIL (${secs}s) 矛盾検出: 実質的な食い違いのみを拾う`);
+      for (const pr of problems) console.log(`   - ${pr}`);
+      console.log(`   conflicts: ${JSON.stringify(conflicts)}`);
+    }
+  }
+
   for (const c of CASES) {
     const skills = await prepareSkillsForChat(c.boardId);
     const started = Date.now();
@@ -302,7 +334,7 @@ async function main() {
   }
 
   await fs.rm(tmp, { recursive: true, force: true });
-  console.log(`\n${CASES.length + 1 - failed}/${CASES.length + 1} passed`);
+  console.log(`\n${CASES.length + 2 - failed}/${CASES.length + 2} passed`);
   process.exit(failed > 0 ? 1 : 0);
 }
 

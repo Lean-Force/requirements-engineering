@@ -8,6 +8,7 @@ export {
   addSource,
   deleteEntry,
   deleteSource,
+  dismissConflict,
   getCategoryMarkdown,
   getKnowledgeState,
   getSourceEntries,

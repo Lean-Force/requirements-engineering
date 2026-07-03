@@ -11,15 +11,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // LLM 抽出をモック(agent モジュールごと差し替え。ゲートウェイの他機能は使わない)
 const extractMock = vi.fn();
 const reviseMock = vi.fn();
+const detectMock = vi.fn();
 vi.mock("@/infrastructure/agent", () => ({
   extractKnowledgeMulti: (...args: unknown[]) => extractMock(...args),
   reviseEntry: (...args: unknown[]) => reviseMock(...args),
+  detectConflicts: (...args: unknown[]) => detectMock(...args),
 }));
 
 import { createBoard } from "@/infrastructure/boards";
 import {
   addSource,
   deleteEntry,
+  dismissConflict,
   getSourceEntries,
   proposeEntryRevision,
   updateEntry,
@@ -40,6 +43,8 @@ beforeEach(async () => {
   tmp = await fs.mkdtemp(path.join(os.tmpdir(), "usm-kb-"));
   process.env.DATA_DIR = tmp;
   extractMock.mockReset();
+  detectMock.mockReset();
+  detectMock.mockResolvedValue([]);
   // 共通知識は「登録済みボード + _common」から合成されるため、ボードとして登録する
   BOARD = (await createBoard("テスト業務")).id;
 });
@@ -321,5 +326,89 @@ describe("エントリ単位の編集(AI 協働)", () => {
       expect.objectContaining({ title: "承認ルール" }),
       "閾値を2億に。承認者は役員。",
     );
+  });
+});
+
+describe("鮮度(同名資料の更新)と矛盾検出", () => {
+  it("同名ファイルの追加は資料の更新になる(edited は保持・原資料は差し替え)", async () => {
+    extractMock.mockResolvedValue([
+      { category: "flows", title: "承認ルール", content: "1,000万円超は部長承認", common: false },
+    ]);
+    const first = await addSource(BOARD, "設計.txt", Buffer.from("旧原文"));
+    const sourceId = first.sources[0].id;
+    // 1 件を人が修正しておく
+    const { entries } = await getSourceEntries(BOARD, sourceId);
+    await updateEntry(BOARD, sourceId, entries[0].id, {
+      title: "承認ルール(人が修正)",
+      content: "2億円超は役員承認",
+      common: false,
+    });
+
+    // 同名で再アップロード(改訂版)
+    extractMock.mockResolvedValue([
+      { category: "flows", title: "新ルール", content: "即時送金は上限500万円", common: false },
+    ]);
+    const next = await addSource(BOARD, "設計.txt", Buffer.from("新原文"));
+
+    expect(next.sources).toHaveLength(1); // 増えない = 更新
+    expect(next.sources[0].id).toBe(sourceId);
+    const after = (await getSourceEntries(BOARD, sourceId)).entries;
+    expect(after.some((e) => e.title === "承認ルール(人が修正)")).toBe(true); // edited 保持
+    expect(after.some((e) => e.title === "新ルール")).toBe(true);
+    expect(after.some((e) => e.title === "承認ルール" && !e.edited)).toBe(false); // 旧の未編集分は消える
+    // 原資料が差し替わっている(再抽出は新原文を読む)
+    await reextractSource(BOARD, sourceId);
+    expect(extractMock).toHaveBeenLastCalledWith("設計.txt", expect.stringContaining("新原文"));
+  });
+
+  it("取り込み時に既存知識と突合し、矛盾が state に載る → 解決済みで消える", async () => {
+    extractMock.mockResolvedValue([
+      { category: "flows", title: "承認ルール", content: "1,000万円超は部長承認", common: false },
+    ]);
+    await addSource(BOARD, "旧規程.txt", Buffer.from("x"));
+
+    extractMock.mockResolvedValue([
+      { category: "flows", title: "承認ルール", content: "2億円超は役員承認", common: false },
+    ]);
+    detectMock.mockResolvedValue([
+      {
+        topic: "送金の承認閾値",
+        newClaim: "2億円超は役員承認",
+        existingSource: "旧規程.txt",
+        existingClaim: "1,000万円超は部長承認",
+      },
+    ]);
+    const state = await addSource(BOARD, "新規程.txt", Buffer.from("y"));
+
+    expect(state.conflicts).toHaveLength(1);
+    expect(state.conflicts[0].topic).toBe("送金の承認閾値");
+    // 既存側の出典 id が解決されている(資料削除時の掃除用)
+    const oldId = state.sources.find((s) => s.fileName === "旧規程.txt")!.id;
+    expect(state.conflicts[0].existingSourceId).toBe(oldId);
+    // 突合対象には既存知識が出典ラベル付きで渡っている
+    expect(detectMock).toHaveBeenLastCalledWith(
+      "新規程.txt",
+      expect.stringContaining("2億円超"),
+      expect.stringContaining("[出典: 旧規程.txt]"),
+    );
+
+    const cleared = await dismissConflict(BOARD, state.conflicts[0].id);
+    expect(cleared.conflicts).toHaveLength(0);
+  });
+
+  it("資料を削除すると関連する矛盾も消える", async () => {
+    extractMock.mockResolvedValue([
+      { category: "flows", title: "A", content: "a", common: false },
+    ]);
+    await addSource(BOARD, "旧.txt", Buffer.from("x"));
+    detectMock.mockResolvedValue([
+      { topic: "t", newClaim: "n", existingSource: "旧.txt", existingClaim: "e" },
+    ]);
+    const state = await addSource(BOARD, "新.txt", Buffer.from("y"));
+    expect(state.conflicts).toHaveLength(1);
+
+    const newId = state.sources.find((s) => s.fileName === "新.txt")!.id;
+    const after = await deleteSource(BOARD, newId);
+    expect(after.conflicts).toHaveLength(0);
   });
 });

@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { KnowledgeState, SourceMeta } from "@/contracts";
+import ConflictList from "./ConflictList";
 import SourceEntriesViewer, { type EntriesApi } from "./SourceEntriesViewer";
 
 interface Props {
@@ -19,6 +20,8 @@ interface Props {
   entriesApi: (sourceId: string) => EntriesApi;
   /** エントリの保存・削除後の最新状態を反映する */
   onEntriesState: (state: KnowledgeState) => void;
+  /** 矛盾を解決済みにする */
+  onDismissConflict: (id: string) => Promise<string | null>;
   onClose: () => void;
 }
 
@@ -37,6 +40,7 @@ export default function ContextPanel({
   loadCategory,
   entriesApi,
   onEntriesState,
+  onDismissConflict,
   onClose,
 }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
@@ -79,7 +83,7 @@ export default function ContextPanel({
   // 資料クリック → エントリ一覧(AI と協働で直せる)
   const openSource = (source: SourceMeta) => setEntriesFor(source);
 
-  const { sources, categories } = knowledge;
+  const { sources, categories, conflicts } = knowledge;
   const totalEntries = categories.reduce((n, c) => n + c.count, 0);
 
   const renderSource = (s: SourceMeta) => (
@@ -122,7 +126,9 @@ export default function ContextPanel({
         </div>
       </div>
       <div className="context-meta">
-        {reextracting === s.id ? "AI が再抽出しています…" : `${s.entryCount} 件の知識を抽出`}
+        {reextracting === s.id
+          ? "AI が再抽出しています…"
+          : `${s.entryCount} 件の知識を抽出 · ${new Date(s.uploadedAt).toLocaleDateString("ja-JP")} 取込`}
       </div>
     </div>
   );
@@ -156,8 +162,9 @@ export default function ContextPanel({
         />
         <div className="context-hint">
           「{boardName}」の資料として登録します。AI がドメイン知識を抽出し、
-          全社用語・組織・共通規程などの業務横断の知識は自動で共通知識になり、
-          全ボードから参照されます。
+          業務横断の知識は自動で共通知識になります。同名ファイルを追加すると
+          資料の更新として扱われ(✍️ 修正済みの知識は保持)、既存の知識との
+          矛盾があれば検出して表示します。
         </div>
         {error && <div className="context-error">⚠️ {error}</div>}
       </div>
@@ -175,6 +182,8 @@ export default function ContextPanel({
             <span className="kb-count">{c.count}</span>
           </button>
         ))}
+
+        <ConflictList conflicts={conflicts} onDismiss={onDismissConflict} />
 
         <div className="context-section-title">この業務の資料</div>
         {sources.length === 0 && (

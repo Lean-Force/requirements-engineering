@@ -71,3 +71,26 @@ export const ENTRY_REVISE_SCHEMA: Record<string, unknown> = {
     note: { type: "string", description: "何をどう直したか・原資料との食い違いの指摘(日本語1〜2文)" },
   },
 };
+
+/** 矛盾検出の構造化出力スキーマ */
+export const CONFLICT_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["conflicts"],
+  properties: {
+    conflicts: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["topic", "newClaim", "existingSource", "existingClaim"],
+        properties: {
+          topic: { type: "string", description: "何についての食い違いか(短く)" },
+          newClaim: { type: "string", description: "新しい資料側の主張" },
+          existingSource: { type: "string", description: "既存側の出典ラベル(与えられたものをそのまま)" },
+          existingClaim: { type: "string", description: "既存側の主張" },
+        },
+      },
+    },
+  },
+};

@@ -7,9 +7,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { KnowledgeState, SourceMeta } from "@/contracts";
+import ConflictList from "@/ui/ConflictList";
 import SourceEntriesViewer from "@/ui/SourceEntriesViewer";
 
-const EMPTY: KnowledgeState = { sources: [], categories: [] };
+const EMPTY: KnowledgeState = { sources: [], categories: [], conflicts: [] };
 
 interface Viewer {
   title: string;
@@ -117,6 +118,19 @@ export default function KnowledgeAdminPage() {
 
   const openSource = (source: SourceMeta) => setEntriesFor(source);
 
+  // 矛盾を解決済みにする
+  const dismissConflict = useCallback(async (conflictId: string): Promise<string | null> => {
+    try {
+      const res = await fetch(`/api/knowledge/conflicts/${conflictId}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) return (data.error as string) ?? "操作に失敗しました";
+      setKnowledge(data as KnowledgeState);
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : "操作に失敗しました";
+    }
+  }, []);
+
   // 資料 1 件のエントリ操作 API(一覧・AI 修正案・保存・削除)
   const entriesApiFor = useCallback((sourceId: string) => {
     const base = `/api/knowledge/${sourceId}/entries`;
@@ -195,6 +209,8 @@ export default function KnowledgeAdminPage() {
             <span className="kb-count">{c.count}</span>
           </button>
         ))}
+
+        <ConflictList conflicts={knowledge.conflicts} onDismiss={dismissConflict} />
 
         <div className="context-section-title">ここで追加した資料</div>
         {ready && sources.length === 0 && (

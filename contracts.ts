@@ -128,10 +128,29 @@ export interface KnowledgeCategorySummary {
   count: number;
 }
 
+/** 取り込み時に検出された、新旧の知識の食い違い(人が解消するまで残る) */
+export interface KnowledgeConflict {
+  id: string;
+  detectedAt: string;
+  /** 何についての食い違いか(例: 送金の承認閾値) */
+  topic: string;
+  /** 新しく取り込んだ資料名とその主張 */
+  newSource: string;
+  newClaim: string;
+  /** 既存側(資料名 / 確定済みマップ)とその主張 */
+  existingSource: string;
+  existingClaim: string;
+  /** 掃除用(資料削除時に関連する矛盾を消す) */
+  newSourceId: string;
+  existingSourceId?: string;
+}
+
 /** /api/contexts 系のレスポンス(知識ベースの全体像) */
 export interface KnowledgeState {
   sources: SourceMeta[];
   categories: KnowledgeCategorySummary[];
+  /** 未解消の矛盾(このビューの所有スコープ分) */
+  conflicts: KnowledgeConflict[];
 }
 
 /** サーバーから push されるボード同期イベント(SSE) */

@@ -23,7 +23,7 @@ import type {
   StoryMapVersionMeta,
 } from "@/contracts";
 
-const EMPTY_KNOWLEDGE: KnowledgeState = { sources: [], categories: [] };
+const EMPTY_KNOWLEDGE: KnowledgeState = { sources: [], categories: [], conflicts: [] };
 
 interface Props {
   params: { boardId: string };
@@ -394,6 +394,24 @@ export default function BoardPage({ params }: Props) {
     [api],
   );
 
+  // 矛盾を解決済みにする
+  const dismissConflict = useCallback(
+    async (conflictId: string): Promise<string | null> => {
+      try {
+        const res = await fetch(`${api}/contexts/conflicts/${conflictId}`, {
+          method: "DELETE",
+        });
+        const data = await res.json();
+        if (!res.ok) return (data.error as string) ?? "操作に失敗しました";
+        setKnowledge(data as KnowledgeState);
+        return null;
+      } catch (e) {
+        return e instanceof Error ? e.message : "操作に失敗しました";
+      }
+    },
+    [api],
+  );
+
   // 資料 1 件のエントリ操作 API(一覧・AI 修正案・保存・削除)
   const entriesApiFor = useCallback(
     (sourceId: string) => {
@@ -523,6 +541,7 @@ export default function BoardPage({ params }: Props) {
             loadCategory={loadCategoryMarkdown}
             entriesApi={entriesApiFor}
             onEntriesState={setKnowledge}
+            onDismissConflict={dismissConflict}
             onClose={() => setShowContexts(false)}
           />
         )}

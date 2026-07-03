@@ -33,6 +33,7 @@ import type { StoryMap } from "@/domain";
 import { dataRoot, workspaceDir } from "../context/workspace";
 import { boardToolsServer } from "./board-tools";
 import {
+  CONFLICT_DETECT_SYSTEM_PROMPT,
   ENTRY_REVISE_SYSTEM_PROMPT,
   EXTRACT_CATEGORY_DEFS,
   EXTRACT_ORCHESTRATOR_PROMPT,
@@ -43,6 +44,7 @@ import {
 } from "./prompts";
 import {
   CHAT_OUTPUT_SCHEMA,
+  CONFLICT_SCHEMA,
   ENTRY_REVISE_SCHEMA,
   EXTRACT_SCHEMA,
   REFINE_SCHEMA,
@@ -474,6 +476,71 @@ ${instruction}`,
     throw new Error(`修正案の生成に失敗しました: ${errors}`);
   }
   throw new Error("修正案の生成で有効な応答が得られませんでした");
+}
+
+// ---- 矛盾検出 ---------------------------------------------------------------
+
+export interface DetectedConflict {
+  topic: string;
+  newClaim: string;
+  existingSource: string;
+  existingClaim: string;
+}
+
+/**
+ * 新しく取り込んだ知識と既存知識の実質的な食い違いを検出する(ツールなし 1 ターン)。
+ * existingBlocks は「出典ラベル付きの既存知識テキスト」(呼び出し元が組み立てる)。
+ */
+export async function detectConflicts(
+  newSourceName: string,
+  newEntriesText: string,
+  existingBlocks: string,
+): Promise<DetectedConflict[]> {
+  await fs.mkdir(dataRoot(), { recursive: true });
+  const q = query({
+    prompt: `# 新しく取り込んだ資料: ${newSourceName}
+
+${newEntriesText}
+
+# 既存の知識(出典ラベル付き)
+
+${existingBlocks}`,
+    options: {
+      model: process.env.ANTHROPIC_MODEL || undefined,
+      cwd: dataRoot(),
+      systemPrompt: CONFLICT_DETECT_SYSTEM_PROMPT,
+      settingSources: [],
+      allowedTools: [],
+      maxTurns: 4,
+      outputFormat: { type: "json_schema", schema: CONFLICT_SCHEMA },
+    },
+  });
+
+  for await (const message of q) {
+    if (message.type !== "result") continue;
+    if (message.subtype === "success") {
+      console.log(
+        JSON.stringify({
+          at: new Date().toISOString(),
+          kind: "conflict-scan-usage",
+          fileName: newSourceName,
+          usage: message.usage,
+          costUsd: message.total_cost_usd,
+        }),
+      );
+      const output = message.structured_output as
+        | { conflicts: DetectedConflict[] }
+        | undefined;
+      if (!output) throw new Error("矛盾検出の結果が得られませんでした");
+      return output.conflicts;
+    }
+    const errors =
+      "errors" in message && Array.isArray(message.errors)
+        ? message.errors.join(" / ")
+        : message.subtype;
+    throw new Error(`矛盾検出に失敗しました: ${errors}`);
+  }
+  throw new Error("矛盾検出で有効な応答が得られませんでした");
 }
 
 // ---- 内部 ----------------------------------------------------------------

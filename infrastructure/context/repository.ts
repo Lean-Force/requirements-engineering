@@ -3,7 +3,7 @@
 
 import { promises as fs } from "fs";
 import path from "path";
-import type { KnowledgeEntry, SourceMeta } from "@/contracts";
+import type { KnowledgeConflict, KnowledgeEntry, SourceMeta } from "@/contracts";
 import { COMMON_SCOPE, workspaceDir } from "./workspace";
 
 export const sourcesFile = (scope: string) =>
@@ -14,6 +14,8 @@ export const sourceDir = (scope: string, id: string) =>
   path.join(workspaceDir(scope), "sources", id);
 export const skillsRoot = (scope: string) =>
   path.join(workspaceDir(scope), ".claude", "skills");
+export const conflictsFile = (scope: string) =>
+  path.join(workspaceDir(scope), "conflicts.json");
 
 async function readJson<T>(file: string, fallback: T): Promise<T> {
   try {
@@ -30,6 +32,9 @@ export async function writeJson(file: string, data: unknown): Promise<void> {
 
 export const readSources = (scope: string) =>
   readJson<SourceMeta[]>(sourcesFile(scope), []);
+
+export const readConflicts = (scope: string) =>
+  readJson<KnowledgeConflict[]>(conflictsFile(scope), []);
 
 /**
  * エントリの読み取り。common フラグが無い旧データは

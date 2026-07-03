@@ -10,9 +10,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const extractMock = vi.fn();
 const reviseMock = vi.fn();
+const detectMock = vi.fn();
 vi.mock("@/infrastructure/agent", () => ({
   extractKnowledgeMulti: (...args: unknown[]) => extractMock(...args),
   reviseEntry: (...args: unknown[]) => reviseMock(...args),
+  detectConflicts: (...args: unknown[]) => detectMock(...args),
 }));
 
 import { createBoard } from "@/infrastructure/boards";
@@ -31,6 +33,8 @@ beforeEach(async () => {
   tmp = await fs.mkdtemp(path.join(os.tmpdir(), "usm-pres-"));
   process.env.DATA_DIR = tmp;
   extractMock.mockReset();
+  detectMock.mockReset();
+  detectMock.mockResolvedValue([]);
   // 共通知識は「登録済みボード + _common」から合成されるため、ボードとして登録する
   A = (await createBoard("業務A")).id;
   B = (await createBoard("業務B")).id;

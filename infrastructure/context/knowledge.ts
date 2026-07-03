@@ -17,19 +17,24 @@
 // エントリは出典(sourceId)を保持する。同じタイトルが複数ソースから来た場合は
 // 両論併記で出典を明示する(勝手に統合して情報を落とさない)。
 
+import { promises as fs } from "fs";
+import path from "path";
 import type {
   EntryPatch,
   EntryRevision,
   KnowledgeCategory,
   KnowledgeCategorySummary,
+  KnowledgeConflict,
   KnowledgeEntry,
   KnowledgeState,
   SourceMeta,
 } from "@/contracts";
-import { extractKnowledgeMulti, reviseEntry } from "../agent";
+import { detectConflicts, extractKnowledgeMulti, reviseEntry } from "../agent";
 import { listBoards } from "../boards";
 import { isSupportedFile, parseFile } from "./parse";
 import {
+  conflictsFile,
+  readConflicts,
   readEntries,
   readOriginal,
   readSources,
@@ -45,7 +50,7 @@ import {
   renderCommonSkills,
   renderSkills,
 } from "./skills";
-import { COMMON_SCOPE } from "./workspace";
+import { COMMON_SCOPE, workspaceDir } from "./workspace";
 
 // ---- 読み取り --------------------------------------------------------------
 //
@@ -89,11 +94,12 @@ async function view(boardId: string | null): Promise<{
 export async function getKnowledgeState(
   boardId: string | null,
 ): Promise<KnowledgeState> {
-  const [sources, { labelOf, entries }] = await Promise.all([
+  const [sources, conflicts, { labelOf, entries }] = await Promise.all([
     readSources(ownerScope(boardId)),
+    readConflicts(ownerScope(boardId)),
     view(boardId),
   ]);
-  return { sources, categories: summarize(labelOf, entries) };
+  return { sources, categories: summarize(labelOf, entries), conflicts };
 }
 
 // ---- 取り込み・再抽出 -------------------------------------------------------
@@ -135,25 +141,43 @@ export async function addSource(
   }
 
   const scope = ownerScope(boardId);
-  const id = newId();
+  const sources = await readSources(scope);
+  let entries = await readEntries(scope);
+
+  // 同名ファイルは「資料の更新」: 原資料を差し替えて再抽出し、
+  // 人が直したエントリ(edited)は保持する(鮮度のハンドリング)
+  const existing = sources.find((s) => s.fileName === fileName);
+  const id = existing?.id ?? newId();
   await saveOriginal(scope, id, fileName, buffer);
 
-  const sources = await readSources(scope);
-  const entries = await readEntries(scope);
-  sources.push({
-    id,
-    fileName,
-    enabled: true,
-    entryCount: extracted.length,
-    uploadedAt: new Date().toISOString(),
-  });
-  for (const e of extracted) {
-    // 共通管理画面からの追加は業務が無いため必ず共通知識になる
-    entries.push({ id: newId(), sourceId: id, ...e, common: boardId === null ? true : e.common });
+  let kept: KnowledgeEntry[] = [];
+  if (existing) {
+    kept = entries.filter((e) => e.sourceId === id && e.edited);
+    entries = entries.filter((e) => e.sourceId !== id);
+    entries.push(...kept);
+    existing.uploadedAt = new Date().toISOString();
+    existing.entryCount = kept.length + extracted.length;
+  } else {
+    sources.push({
+      id,
+      fileName,
+      enabled: true,
+      entryCount: extracted.length,
+      uploadedAt: new Date().toISOString(),
+    });
   }
+  const added: KnowledgeEntry[] = extracted.map((e) => ({
+    id: newId(),
+    sourceId: id,
+    ...e,
+    // 共通管理画面からの追加は業務が無いため必ず共通知識になる
+    common: boardId === null ? true : e.common,
+  }));
+  entries.push(...added);
   await writeJson(sourcesFile(scope), sources);
   await writeJson(knowledgeFile(scope), entries);
   await rerender(scope);
+  await scanConflicts(boardId, id, fileName, [...kept, ...added]);
   return getKnowledgeState(boardId);
 }
 
@@ -191,6 +215,12 @@ export async function reextractSource(
   await writeJson(sourcesFile(scope), sources);
   await writeJson(knowledgeFile(scope), entries);
   await rerender(scope);
+  await scanConflicts(
+    boardId,
+    sourceId,
+    meta.fileName,
+    entries.filter((e) => e.sourceId === sourceId),
+  );
   return getKnowledgeState(boardId);
 }
 
@@ -226,7 +256,99 @@ export async function deleteSource(
   await removeSourceDir(scope, sourceId);
   await writeJson(sourcesFile(scope), sources.filter((s) => s.id !== sourceId));
   await writeJson(knowledgeFile(scope), entries);
+  await writeJson(
+    conflictsFile(scope),
+    (await readConflicts(scope)).filter(
+      (c) => c.newSourceId !== sourceId && c.existingSourceId !== sourceId,
+    ),
+  );
   await rerender(scope);
+  return getKnowledgeState(boardId);
+}
+
+// ---- 矛盾の検出と解消 --------------------------------------------------------
+
+/**
+ * 取り込んだ資料のエントリを、既存知識(このビューの他資料 + 確定済みマップ)と
+ * 突合して矛盾を検出・永続化する。検出失敗で取り込み自体は失敗させない(warn のみ)。
+ */
+async function scanConflicts(
+  boardId: string | null,
+  sourceId: string,
+  fileName: string,
+  newEntries: KnowledgeEntry[],
+): Promise<void> {
+  const scope = ownerScope(boardId);
+  try {
+    // 既存知識: このビューから見える、当該資料「以外」のエントリ(出典ラベル付き)
+    const { labelOf, entries } = await view(boardId);
+    const others = entries.filter(
+      (e) => e.sourceId !== sourceId && labelOf.has(e.sourceId),
+    );
+    const blocks: string[] = others.map(
+      (e) => `[出典: ${labelOf.get(e.sourceId)}] ${e.title}: ${e.content}`,
+    );
+    // 確定済みマップ(チーム合意)は最優先の既存知識として突合する
+    if (boardId !== null) {
+      const snippet = await fs
+        .readFile(
+          path.join(workspaceDir(COMMON_SCOPE), "map-snippets", `${boardId}.md`),
+          "utf-8",
+        )
+        .catch(() => "");
+      if (snippet) blocks.push(`[出典: 確定済みマップ(この業務の合意)] ${snippet}`);
+    }
+
+    // この資料に関する既存の矛盾は洗い直す(解消済みの残骸を残さない)
+    const remaining = (await readConflicts(scope)).filter(
+      (c) => c.newSourceId !== sourceId,
+    );
+    if (blocks.length === 0 || newEntries.length === 0) {
+      await writeJson(conflictsFile(scope), remaining);
+      return;
+    }
+
+    const newText = newEntries.map((e) => `${e.title}: ${e.content}`).join("\n");
+    const detected = await detectConflicts(fileName, newText, blocks.join("\n"));
+    const labelToId = new Map([...labelOf].map(([id, label]) => [label, id]));
+    const conflicts: KnowledgeConflict[] = detected.map((d) => ({
+      id: newId(),
+      detectedAt: new Date().toISOString(),
+      topic: d.topic,
+      newSource: fileName,
+      newClaim: d.newClaim,
+      existingSource: d.existingSource,
+      existingClaim: d.existingClaim,
+      newSourceId: sourceId,
+      existingSourceId: labelToId.get(d.existingSource),
+    }));
+    await writeJson(conflictsFile(scope), [...remaining, ...conflicts]);
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        at: new Date().toISOString(),
+        kind: "conflict-scan-failed",
+        fileName,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+}
+
+/** 矛盾を解決済みにする(一覧から消す) */
+export async function dismissConflict(
+  boardId: string | null,
+  conflictId: string,
+): Promise<KnowledgeState> {
+  const scope = ownerScope(boardId);
+  const conflicts = await readConflicts(scope);
+  if (!conflicts.some((c) => c.id === conflictId)) {
+    throw new Error("指定の矛盾が見つかりません");
+  }
+  await writeJson(
+    conflictsFile(scope),
+    conflicts.filter((c) => c.id !== conflictId),
+  );
   return getKnowledgeState(boardId);
 }
 
