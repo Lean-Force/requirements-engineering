@@ -238,3 +238,4 @@ body,html{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
 .story-card.dragging{opacity:.45;cursor:grabbing}
 .story-card.drop-before{box-shadow:0 -3px 0 0 var(--accent),0 1px 3px rgba(0,0,0,.15)}
 .story-card.drop-after{box-shadow:0 3px 0 0 var(--accent),0 1px 3px rgba(0,0,0,.15)}
+.story-card{-webkit-user-drag:element;user-select:none;-webkit-user-select:none}

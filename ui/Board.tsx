@@ -530,6 +530,8 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
                               style={{ background: c.bg, borderColor: c.border }}
                               draggable
                               onDragStart={(e) => {
+                                // Safari / Firefox は setData しないとドラッグが開始されない
+                                e.dataTransfer.setData("text/plain", st.id);
                                 e.dataTransfer.effectAllowed = "move";
                                 setDraggingStory({
                                   activityId: activity.id,
