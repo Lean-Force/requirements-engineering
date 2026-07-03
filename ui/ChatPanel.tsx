@@ -17,6 +17,25 @@ interface Props {
   onClear?: () => void;
 }
 
+// skill 名 → 表示ラベル(参照した知識の表示用)
+const CATEGORY_LABELS: Record<string, string> = {
+  terms: "用語集",
+  actors: "アクター",
+  flows: "業務フロー・ルール",
+  data: "データ・IF定義",
+  background: "背景・課題",
+};
+
+function skillLabel(name: string): string {
+  if (name === "kb-map") return "この業務のマップ";
+  if (name === "kb-common-maps") return "各業務の合意済みマップ";
+  const common = /^kb-common-(.+)$/.exec(name);
+  if (common) return `${CATEGORY_LABELS[common[1]] ?? common[1]}(共通)`;
+  const board = /^kb-(.+)$/.exec(name);
+  if (board) return CATEGORY_LABELS[board[1]] ?? board[1];
+  return name;
+}
+
 export default function ChatPanel({
   messages,
   loading,
@@ -94,6 +113,11 @@ export default function ChatPanel({
           return (
             <div key={i} className={`msg ${m.role}`}>
               {m.content}
+              {m.role === "assistant" && (m.usedSkills?.length ?? 0) > 0 && (
+                <div className="msg-used-skills" title="AI がこの返信で参照したドメイン知識">
+                  📖 参照: {m.usedSkills!.map(skillLabel).join("・")}
+                </div>
+              )}
             </div>
           );
         })}

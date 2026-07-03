@@ -5,6 +5,8 @@ import type { StoryMap } from "@/domain";
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  /** assistant のターンで実際に参照したドメイン知識 skill 名(参照表示用) */
+  usedSkills?: string[];
 }
 
 /** マップの 1 スナップショット(版)。保存実体には storyMap 全体を含む。 */

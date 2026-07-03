@@ -87,7 +87,7 @@ ${JSON.stringify(currentMap)}`,
       // この 1 ターンを永続化(マップ更新 + 版追加 + 会話保存)。
       const fullConversation: ChatMessage[] = [
         ...messages,
-        { role: "assistant", content: parsed.reply },
+        { role: "assistant", content: parsed.reply, usedSkills: parsed.usedSkills },
       ];
       const { storyMap, versions } = await applyChatTurn(
         boardId,

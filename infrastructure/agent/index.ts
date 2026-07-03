@@ -105,8 +105,15 @@ export async function generate(
   // ({skill: "kb-…"})で行われる。SKILL.md を直接 Read するケースも保険で拾う。
   // 「読むべき時に読んだか」の eval と、参照表示に使う。
   const usedSkills = new Set<string>();
+  // セッションに実際にロードされた skill(「渡したつもり」との突合用)
+  let loadedSkills: string[] = [];
 
   for await (const message of q) {
+    if (message.type === "system" && message.subtype === "init") {
+      loadedSkills = message.skills;
+      warnIfSkillsMissing("chat", skillNames, loadedSkills);
+      continue;
+    }
     if (message.type === "assistant") {
       for (const block of message.message.content) {
         if (block.type !== "tool_use") continue;
@@ -132,6 +139,7 @@ export async function generate(
           turns: message.num_turns,
           durationMs: message.duration_ms,
           usedSkills: [...usedSkills],
+          loadedSkills,
           usage: message.usage,
           costUsd: message.total_cost_usd,
         }),
@@ -198,6 +206,10 @@ export async function refineCard(
   });
 
   for await (const message of q) {
+    if (message.type === "system" && message.subtype === "init") {
+      warnIfSkillsMissing("refine", skillNames, message.skills);
+      continue;
+    }
     if (message.type !== "result") continue;
     if (message.subtype === "success") {
       console.log(
@@ -396,6 +408,29 @@ export async function extractKnowledgeMulti(
 }
 
 // ---- 内部 ----------------------------------------------------------------
+
+/**
+ * 渡した skill 名がセッションへ実際にロードされたかを突合し、欠けていれば warn を出す。
+ * SKILL.md はあるのに SDK が発見しない類の事故(settingSources 未指定など)を運用ログで検知する。
+ */
+function warnIfSkillsMissing(
+  where: string,
+  requested: string[],
+  loaded: string[],
+): void {
+  const missing = requested.filter((name) => !loaded.includes(name));
+  if (missing.length === 0) return;
+  console.warn(
+    JSON.stringify({
+      at: new Date().toISOString(),
+      kind: "skills-mismatch",
+      where,
+      requested,
+      loaded,
+      missing,
+    }),
+  );
+}
 
 /**
  * ワークスペース外の読み取りを遮断する PreToolUse フック。
