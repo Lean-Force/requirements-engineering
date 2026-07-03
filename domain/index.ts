@@ -35,6 +35,7 @@ export {
   addStory,
   renameStory,
   removeStory,
+  moveStory,
   setStoryFixed,
   setActionFixed,
   enforceFixed,

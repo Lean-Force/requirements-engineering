@@ -143,6 +143,29 @@ When(
   },
 );
 
+When(
+  "ストーリー {string} を {string} の上へドラッグする",
+  async function (this: UsmWorld, srcText: string, dstText: string) {
+    const src = this.page.locator(".story-card", { hasText: srcText });
+    const dst = this.page.locator(".story-card", { hasText: dstText });
+    // 対象カードの上半分に落とす = その前に挿入
+    await withSave(this, () => src.dragTo(dst, { targetPosition: { x: 70, y: 8 } }));
+  },
+);
+
+Then(
+  "ストーリー列の並びは {string} である",
+  async function (this: UsmWorld, expected: string) {
+    await expect
+      .poll(async () =>
+        (await this.page.locator(".story-card").allTextContents())
+          .map((t) => t.replace(/×|📌/g, "").trim())
+          .join(", "),
+      )
+      .toBe(expected);
+  },
+);
+
 // ---- 共通の Then ----
 
 Then(

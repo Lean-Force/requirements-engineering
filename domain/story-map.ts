@@ -188,6 +188,64 @@ export function removeStory(
   );
 }
 
+/**
+ * ストーリーを移動する(同じ行動内の並び替え / 別の行動・場面への付け替え)。
+ * toIndex は「移動先の行動の stories 配列に挿入する位置」。
+ * 対象が見つからない場合は何もしない。
+ */
+export function moveStory(
+  map: StoryMap,
+  from: { activityId: string; actionId: string; storyId: string },
+  to: { activityId: string; actionId: string; index: number },
+): StoryMap {
+  const source = findAction(map, from.activityId, from.actionId);
+  const story = source?.stories.find((s) => s.id === from.storyId);
+  if (!source || !story) return map;
+  if (!findAction(map, to.activityId, to.actionId)) return map;
+
+  // 同一行動内の並び替えは、取り除いた分だけ挿入位置を詰める
+  const sameAction = from.actionId === to.actionId && from.activityId === to.activityId;
+  const removeIndex = source.stories.findIndex((s) => s.id === from.storyId);
+  const insertIndex =
+    sameAction && removeIndex < to.index ? to.index - 1 : to.index;
+
+  // 取り除く
+  const removed: StoryMap = {
+    ...map,
+    activities: map.activities.map((act) =>
+      act.id !== from.activityId
+        ? act
+        : {
+            ...act,
+            actions: act.actions.map((a) =>
+              a.id !== from.actionId
+                ? a
+                : { ...a, stories: a.stories.filter((s) => s.id !== from.storyId) },
+            ),
+          },
+    ),
+  };
+
+  // 挿入する
+  return {
+    ...removed,
+    activities: removed.activities.map((act) =>
+      act.id !== to.activityId
+        ? act
+        : {
+            ...act,
+            actions: act.actions.map((a) => {
+              if (a.id !== to.actionId) return a;
+              const stories = [...a.stories];
+              const at = Math.max(0, Math.min(insertIndex, stories.length));
+              stories.splice(at, 0, { ...story });
+              return { ...a, stories };
+            }),
+          },
+    ),
+  };
+}
+
 /** ストーリーの確定(fix)状態を切り替える */
 export function setStoryFixed(
   map: StoryMap,

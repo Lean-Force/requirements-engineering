@@ -234,3 +234,7 @@ body,html{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
 .story-modal-input:disabled{opacity:.75;cursor:not-allowed}
 .story-modal-delete:disabled{opacity:.4;cursor:not-allowed}
 .note.fixed{border-width:2px;box-shadow:0 1px 4px rgba(0,0,0,.22)}
+.story-card[draggable="true"]{cursor:grab}
+.story-card.dragging{opacity:.45;cursor:grabbing}
+.story-card.drop-before{box-shadow:0 -3px 0 0 var(--accent),0 1px 3px rgba(0,0,0,.15)}
+.story-card.drop-after{box-shadow:0 3px 0 0 var(--accent),0 1px 3px rgba(0,0,0,.15)}

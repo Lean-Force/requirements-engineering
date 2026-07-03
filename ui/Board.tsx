@@ -196,6 +196,17 @@ type Activity = StoryMap["activities"][number];
 
 export default function Board({ storyMap, onChange, onPickStory }: Props) {
   const { actors, activities } = storyMap;
+
+  // ストーリーの D&D 並び替え(同じ行動内の上下 + 別の行動・場面への付け替え)。
+  // dropHint はインジケータ表示用(対象カードの上半分 = 前に挿入 / 下半分 = 後ろに挿入)。
+  const [draggingStory, setDraggingStory] = useState<{
+    activityId: string;
+    actionId: string;
+    storyId: string;
+  } | null>(null);
+  const [dropHint, setDropHint] = useState<{ storyId: string; after: boolean } | null>(null);
+  // ドラッグ直後の click で編集モーダルが開かないようにするガード
+  const justDragged = useRef(false);
   const [editor, setEditor] = useState<Editor | null>(null);
 
   const colorOf = (actorId: string) => {
@@ -502,14 +513,68 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
                       {/* 上: ストーリーカードを列の先頭から詰めて縦積み。編集中は textarea に差し替え */}
                       {activity.actions.map((action) => {
                         const c = colorOf(action.actorId);
-                        return action.stories.map((st) => (
+                        return action.stories.map((st, storyIndex) => (
                             <div
                               key={st.id}
-                              className={`story-card clickable${st.fixed ? " fixed" : ""}`}
+                              className={`story-card clickable${st.fixed ? " fixed" : ""}${
+                                draggingStory?.storyId === st.id ? " dragging" : ""
+                              }${
+                                dropHint?.storyId === st.id
+                                  ? dropHint.after
+                                    ? " drop-after"
+                                    : " drop-before"
+                                  : ""
+                              }`}
                               data-action-id={action.id}
                               title={st.fixed ? `🔒 確定済み: ${st.text}` : st.text}
                               style={{ background: c.bg, borderColor: c.border }}
-                              onClick={() =>
+                              draggable
+                              onDragStart={(e) => {
+                                e.dataTransfer.effectAllowed = "move";
+                                setDraggingStory({
+                                  activityId: activity.id,
+                                  actionId: action.id,
+                                  storyId: st.id,
+                                });
+                              }}
+                              onDragEnd={() => {
+                                setDraggingStory(null);
+                                setDropHint(null);
+                                justDragged.current = true;
+                                setTimeout(() => (justDragged.current = false), 150);
+                              }}
+                              onDragOver={(e) => {
+                                if (!draggingStory || draggingStory.storyId === st.id) return;
+                                e.preventDefault();
+                                e.dataTransfer.dropEffect = "move";
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                const after = e.clientY > rect.top + rect.height / 2;
+                                setDropHint((h) =>
+                                  h?.storyId === st.id && h.after === after
+                                    ? h
+                                    : { storyId: st.id, after },
+                                );
+                              }}
+                              onDragLeave={() =>
+                                setDropHint((h) => (h?.storyId === st.id ? null : h))
+                              }
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                if (!draggingStory || draggingStory.storyId === st.id) return;
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                const after = e.clientY > rect.top + rect.height / 2;
+                                onChange(
+                                  domain.moveStory(storyMap, draggingStory, {
+                                    activityId: activity.id,
+                                    actionId: action.id,
+                                    index: storyIndex + (after ? 1 : 0),
+                                  }),
+                                );
+                                setDraggingStory(null);
+                                setDropHint(null);
+                              }}
+                              onClick={() => {
+                                if (justDragged.current) return;
                                 setEditor({
                                   mode: "story-edit",
                                   activityId: activity.id,
@@ -517,8 +582,8 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
                                   storyId: st.id,
                                   initial: st.text,
                                   initialFixed: st.fixed === true,
-                                })
-                              }
+                                });
+                              }}
                             >
                               <span style={{ fontSize: noteFontSize(st.text) }}>
                                 {st.fixed && <span className="story-lock">🔒</span>}
