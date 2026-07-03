@@ -15,13 +15,15 @@
 
 import { promises as fs } from "fs";
 import path from "path";
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
 import type {
   ChatMessage,
   ChatResponse,
   KnowledgeCategory,
 } from "@/contracts";
 import type { StoryMap } from "@/domain";
+import { createBoard, listBoards } from "./boards";
 import { dataRoot, workspaceDir } from "./context/workspace";
 
 /** LLM の接続設定があるか(Bedrock / Anthropic API 直結 / ローカル認証のいずれか) */
@@ -55,6 +57,12 @@ const SYSTEM_PROMPT = `あなたは User Story Mapping(USM)の専門ファシリ
 - 利用可能な参照資料(要件一覧・業務フロー・ヒアリングメモ・用語集など)が Skill として提示されることがある。
 - ユーザーの説明に関係しそうな資料があれば内容を読み、マップへ反映する際の根拠・用語の正として使う。
 - 資料とユーザーの発言が食い違う場合は、ユーザーの発言を優先しつつ reply で相違に触れる。
+
+# ボード(業務)の管理
+- このアプリは業務ごとにボードを持つ。あなたが今整理しているのは「現在のボード」のマップ。
+- ユーザーが別の業務のボード作成を頼んだら create_board ツールで作成する(既存と重複しないよう、必要なら list_boards で確認)。
+- 作成後は reply で「左上のプルダウンから開けます」と案内する。作成しただけでは現在のマップは変わらないので、storyMap は変更せずそのまま返す。
+- 頼まれていないのに勝手にボードを作らない。
 
 # 厳守するルール
 1. 必ず「更新後のマップ全体」を structured output で返す。既存の要素を勝手に削除しない(ユーザーが削除を指示した場合を除く)。
@@ -125,6 +133,48 @@ const CHAT_OUTPUT_SCHEMA: Record<string, unknown> = {
   },
 };
 
+// チャットからボード(業務)を操作するためのカスタムツール(アプリ内 MCP サーバー)。
+// ツールの実体はサーバー側の boards モジュールをそのまま呼ぶ。
+function boardToolsServer() {
+  return createSdkMcpServer({
+    name: "usm",
+    tools: [
+      tool(
+        "list_boards",
+        "既存のボード(業務)の一覧を返す。ボード作成前の重複確認などに使う。",
+        {},
+        async () => {
+          const boards = await listBoards();
+          return {
+            content: [
+              {
+                type: "text",
+                text: boards.map((b) => `- ${b.name} (id: ${b.id})`).join("\n") || "(ボードなし)",
+              },
+            ],
+          };
+        },
+      ),
+      tool(
+        "create_board",
+        "新しいボード(業務)を作成する。ユーザーに別業務のボード作成を頼まれたときだけ使う。",
+        { name: z.string().describe("ボード名(業務名。例: 口座開設)") },
+        async ({ name }) => {
+          const board = await createBoard(name);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `ボード「${board.name}」を作成しました(id: ${board.id})。ユーザーは左上のプルダウンから開けます。`,
+              },
+            ],
+          };
+        },
+      ),
+    ],
+  });
+}
+
 /** 会話履歴を 1 本のプロンプトに畳む(Agent SDK の query は単一プロンプト入力) */
 function renderConversation(conversation: ChatMessage[]): string {
   return conversation
@@ -156,8 +206,16 @@ export async function generate(
       // 指定しないと設定を読まないため project を明示する。
       settingSources: ["project"],
       skills: skillNames,
-      // 参照資料を読む以外の行動はさせない(読み取り専用ツールのみ)
-      allowedTools: ["Read", "Glob", "Grep"],
+      // ボード操作のカスタムツール(チャットからのボード作成)
+      mcpServers: { usm: boardToolsServer() },
+      // 知識を読む + ボード操作以外の行動はさせない
+      allowedTools: [
+        "Read",
+        "Glob",
+        "Grep",
+        "mcp__usm__list_boards",
+        "mcp__usm__create_board",
+      ],
       maxTurns,
       outputFormat: { type: "json_schema", schema: CHAT_OUTPUT_SCHEMA },
       // ワークスペース外の読み取りを遮断する(Read は絶対パスで任意の

@@ -50,6 +50,17 @@ export default function BoardPage({ params }: Props) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // SSE 由来の再取得が自分の進行中の操作を上書きしないためのガード
   const loadingRef = useRef(false);
+  // ?bootstrap=1 付きで開かれたら、取り込み済み知識から叩き台を自動生成する
+  const bootstrapRef = useRef(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("bootstrap") === "1") {
+      bootstrapRef.current = true;
+      // リロードで再生成されないよう URL からフラグを消す
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, []);
 
   // 次回 / を開いたときにこのボードへ直行できるよう控える
   useEffect(() => {
@@ -189,6 +200,17 @@ export default function BoardPage({ params }: Props) {
     },
     [api, messages, storyMap, selectedStory],
   );
+
+  // 資料つきで作成されたボード: 読み込み完了後に一度だけ叩き台の生成を AI へ依頼する
+  useEffect(() => {
+    if (!ready || !bootstrapRef.current) return;
+    bootstrapRef.current = false;
+    if (messages.length === 0) {
+      sendMessage(
+        "アップロードした資料から抽出されたドメイン知識(用語・アクター・業務フロー・データ定義・背景)をもとに、この業務の User Story Map の叩き台を作成してください。",
+      );
+    }
+  }, [ready, messages.length, sendMessage]);
 
   // ボードでの直接編集(D&D・追加・削除)→ debounce して保存
   const updateStoryMap = useCallback(

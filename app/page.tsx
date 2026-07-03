@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { BoardMeta } from "@/contracts";
 
@@ -11,8 +11,10 @@ export default function BoardListPage() {
   const [boards, setBoards] = useState<BoardMeta[]>([]);
   const [ready, setReady] = useState(false);
   const [name, setName] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [files, setFiles] = useState<File[]>([]);
+  const [phase, setPhase] = useState<"idle" | "creating" | "extracting">("idle");
   const [error, setError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch("/api/boards")
@@ -40,8 +42,8 @@ export default function BoardListPage() {
 
   const create = useCallback(async () => {
     const trimmed = name.trim();
-    if (!trimmed || creating) return;
-    setCreating(true);
+    if (!trimmed || phase !== "idle") return;
+    setPhase("creating");
     setError(null);
     try {
       const res = await fetch("/api/boards", {
@@ -54,13 +56,33 @@ export default function BoardListPage() {
         setError((data.error as string) ?? "作成に失敗しました");
         return;
       }
-      router.push(`/boards/${(data as BoardMeta).id}`);
+      const board = data as BoardMeta;
+
+      // 資料が添付されていれば取り込み(知識抽出)→ 叩き台生成つきで遷移
+      if (files.length > 0) {
+        setPhase("extracting");
+        const form = new FormData();
+        for (const f of files) form.append("files", f);
+        const up = await fetch(`/api/boards/${board.id}/contexts`, {
+          method: "POST",
+          body: form,
+        });
+        if (up.ok) {
+          router.push(`/boards/${board.id}?bootstrap=1`);
+          return;
+        }
+        // 取り込み失敗でもボードは開く(パネルから上げ直せる)
+        router.push(`/boards/${board.id}`);
+        return;
+      }
+
+      router.push(`/boards/${board.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "作成に失敗しました");
     } finally {
-      setCreating(false);
+      setPhase("idle");
     }
-  }, [name, creating, router]);
+  }, [name, files, phase, router]);
 
   const formatTime = (iso: string) => {
     const d = new Date(iso);
@@ -79,16 +101,40 @@ export default function BoardListPage() {
         <input
           type="text"
           value={name}
-          placeholder="新しいボード名(例: 送金処理)"
+          placeholder="新しいボード名(業務名。例: 送金処理)"
+          disabled={phase !== "idle"}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") create();
           }}
         />
-        <button onClick={create} disabled={creating || !name.trim()}>
-          {creating ? "作成中…" : "ボードを作成"}
+        <button onClick={create} disabled={phase !== "idle" || !name.trim()}>
+          {phase === "creating"
+            ? "作成中…"
+            : phase === "extracting"
+              ? "知識を抽出中…"
+              : files.length > 0
+                ? `作成(資料${files.length}件 → 叩き台)`
+                : "ボードを作成"}
         </button>
       </div>
+      <button
+        className="board-switcher-attach"
+        onClick={() => fileInput.current?.click()}
+        disabled={phase !== "idle"}
+      >
+        📎 {files.length > 0
+          ? `資料 ${files.length} 件を添付済み(クリックで選び直し)`
+          : "業務の資料を添付して、AI に叩き台まで作らせる(任意)"}
+      </button>
+      <input
+        ref={fileInput}
+        type="file"
+        multiple
+        accept=".xlsx,.xls,.csv,.pdf,.md,.txt"
+        style={{ display: "none" }}
+        onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+      />
       {error && <div className="board-list-error">⚠️ {error}</div>}
 
       <div className="board-list">
