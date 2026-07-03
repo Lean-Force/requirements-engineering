@@ -104,6 +104,42 @@ ${EXTRACT_RULES}`;
 /** 一括(1 パス)抽出用のシステムプロンプト(観点別パスとの比較 eval にも使う) */
 export const EXTRACT_SYSTEM_PROMPT = extractSystemPrompt();
 
+/**
+ * 観点別 subagent のシステムプロンプト。資料はオーケストレータから渡されず、
+ * カレントディレクトリの source.md を自分で読む(全文を往復させない)。
+ * subagent は構造化出力を使えないため、最終メッセージを JSON 配列に限定する。
+ */
+export function extractSubagentPrompt(
+  focus: "terms" | "actors" | "flows" | "data" | "background",
+): string {
+  return `${extractSystemPrompt(focus)}
+
+# 手順
+1. カレントディレクトリの source.md(資料の全文)を Read ツールで読む。
+2. 上記の担当観点で知識エントリを漏れなく抽出する。
+
+# 出力形式(厳守)
+最終メッセージは JSON 配列「だけ」にする(前置き・説明・コードフェンス禁止):
+[{"category":"${focus}","title":"…","content":"…","common":false}, …]
+該当する知識が無ければ [] を返す。`;
+}
+
+/** 観点別 subagent を束ねるオーケストレータのシステムプロンプト */
+export const EXTRACT_ORCHESTRATOR_PROMPT = `あなたはドメイン知識抽出のオーケストレータです。
+資料(カレントディレクトリの source.md)から知識を抽出するため、観点別の subagent を使います。
+
+# 手順(厳守)
+1. 5 つの subagent(extract-terms / extract-actors / extract-flows / extract-data / extract-background)を、
+   必ず「1 つのメッセージでまとめて」起動する(= 並列実行)。5 観点すべてを起動する。省略しない。
+   各 subagent への指示は「source.md を読み、担当観点の知識エントリを JSON 配列で返してください」でよい。
+2. 各 subagent が返した JSON 配列を統合し、構造化出力の entries として返す。
+
+# 統合ルール
+- エントリの title / content / common は subagent の返答を「一字も変えずに」使う。要約・言い換え・削除をしない。
+- category は担当 subagent の観点に合わせる(extract-terms の結果は "terms")。
+- 複数観点から似たエントリが来ても両方残す(重複の統合はしない)。
+- JSON として壊れている要素だけは捨ててよい。自分で資料から抽出し直さない。`;
+
 export const REFINE_SYSTEM_PROMPT = `あなたは User Story Mapping(USM)の付箋を推敲する専門家です。
 ユーザーが編集中の付箋(行動またはストーリー)1 枚の本文を、意図を変えずに読みやすく直してください。
 

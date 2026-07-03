@@ -33,6 +33,8 @@ import { dataRoot, workspaceDir } from "../context/workspace";
 import { boardToolsServer } from "./board-tools";
 import {
   EXTRACT_CATEGORY_DEFS,
+  EXTRACT_ORCHESTRATOR_PROMPT,
+  extractSubagentPrompt,
   extractSystemPrompt,
   REFINE_SYSTEM_PROMPT,
   SYSTEM_PROMPT,
@@ -289,25 +291,108 @@ export async function extractKnowledge(
 }
 
 /**
- * 観点別 5 パス並列の知識抽出。同じ資料をカテゴリ専用プロンプトで並列に読み、
- * 結果をカテゴリ順にマージする。1 パスに全カテゴリを任せるより拾い漏れが減る
- * (比較は tests/eval の再現率ケースで測る)。一時的な失敗はパス単位で 1 回リトライ。
+ * 観点別 subagent による知識抽出(Agent SDK の agents オプション)。
+ * オーケストレータが 5 観点の subagent(extract-<category>)を 1 メッセージで
+ * 並列起動し、各 subagent は一時ワークスペースの source.md を自分で読んで
+ * 担当観点のエントリを返す。オーケストレータは結果を統合して構造化出力で返す。
+ * 1 パスに全カテゴリを任せるより拾い漏れが減る(比較は tests/eval の再現率ケース)。
  */
 export async function extractKnowledgeMulti(
   fileName: string,
   markdown: string,
 ): Promise<ExtractedEntry[]> {
-  const passes = await Promise.all(
-    EXTRACT_CATEGORY_DEFS.map(async ({ category }) => {
-      try {
-        return await extractKnowledge(fileName, markdown, category);
-      } catch {
-        // 並列パスの片肺失敗で取り込み全体を落とさないよう 1 回だけやり直す
-        return extractKnowledge(fileName, markdown, category);
-      }
-    }),
+  // 資料をファイルとして置き、subagent に Read させる
+  // (オーケストレータの出力トークン経由で全文を配り直すと高コストかつ欠落しやすい)
+  const dir = path.join(
+    dataRoot(),
+    "extract-tmp",
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
   );
-  return passes.flat();
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(
+    path.join(dir, "source.md"),
+    `# 資料: ${fileName}\n\n${markdown}`,
+    "utf-8",
+  );
+
+  try {
+    const q = query({
+      prompt: `資料 source.md(元ファイル名: ${fileName})について、5 観点の subagent をすべて並列起動してドメイン知識を抽出し、統合してください。`,
+      options: {
+        model: process.env.ANTHROPIC_MODEL || undefined,
+        cwd: dir,
+        systemPrompt: EXTRACT_ORCHESTRATOR_PROMPT,
+        settingSources: [],
+        // 観点別 subagent の定義(モデルはメインを継承)
+        agents: Object.fromEntries(
+          EXTRACT_CATEGORY_DEFS.map((c) => [
+            `extract-${c.category}`,
+            {
+              description: `${c.label}(${c.detail})の観点で資料 source.md から知識エントリを抽出する`,
+              prompt: extractSubagentPrompt(c.category),
+              tools: ["Read"],
+            },
+          ]),
+        ),
+        // オーケストレータには subagent 起動だけを許可する
+        allowedTools: ["Agent", "Task"],
+        maxTurns: 12,
+        outputFormat: { type: "json_schema", schema: EXTRACT_SCHEMA },
+        hooks: workspaceGuard(dir),
+      },
+    });
+
+    // 実際に起動された観点(全 5 観点が起動されたかの監視用)
+    const launched = new Set<string>();
+
+    for await (const message of q) {
+      if (message.type === "assistant") {
+        for (const block of message.message.content) {
+          if (block.type !== "tool_use") continue;
+          if (block.name === "Agent" || block.name === "Task") {
+            const t = (block.input as { subagent_type?: string }).subagent_type;
+            if (t) launched.add(t);
+          }
+        }
+        continue;
+      }
+      if (message.type !== "result") continue;
+      if (message.subtype === "success") {
+        console.log(
+          JSON.stringify({
+            at: new Date().toISOString(),
+            kind: "extract-usage",
+            fileName,
+            focus: "subagents",
+            launched: [...launched],
+            turns: message.num_turns,
+            durationMs: message.duration_ms,
+            usage: message.usage,
+            costUsd: message.total_cost_usd,
+          }),
+        );
+        const output = message.structured_output as
+          | { entries: ExtractedEntry[] }
+          | undefined;
+        if (!output) throw new Error("知識の抽出結果が得られませんでした");
+        if (launched.size < EXTRACT_CATEGORY_DEFS.length) {
+          // 起動漏れは取りこぼしに直結するため失敗として扱う(呼び出し元でエラー表示)
+          throw new Error(
+            `一部の観点が実行されませんでした(実行済み: ${[...launched].join(", ") || "なし"})。再試行してください`,
+          );
+        }
+        return output.entries;
+      }
+      const errors =
+        "errors" in message && Array.isArray(message.errors)
+          ? message.errors.join(" / ")
+          : message.subtype;
+      throw new Error(`知識の抽出に失敗しました: ${errors}`);
+    }
+    throw new Error("知識の抽出で有効な応答が得られませんでした");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 }
 
 // ---- 内部 ----------------------------------------------------------------
