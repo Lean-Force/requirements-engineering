@@ -10,7 +10,7 @@ AIがユーザーの入力からアクティビティ、ユーザータスク、
 ## 主な機能
 
 - **AIチャットによるストーリー整理**: 自然言語でプロダクトの要件を伝えると、AIがUser Story Mapの要素に分解・構造化
-- **コンテキスト(参照資料)**: 要件一覧・業務フロー・議事録・用語集などの Excel / CSV / PDF / テキストをアップロードすると Agent Skill として保存され、AI が必要と判断したときだけ参照する(progressive disclosure)。資料単位で on/off 可能
+- **ドメイン知識ベース**: 要件一覧・業務フロー・議事録・用語集などの Excel / CSV / PDF / テキストをアップロードすると、AI が固定5カテゴリ(用語集 / アクター / 業務フロー・ルール / データ・IF定義 / 背景・課題)のドメイン知識に抽出・蓄積する。知識はカテゴリごとの Agent Skill になり、AI が必要と判断したときだけ参照(progressive disclosure)。各知識は出典(元ファイル)を保持し、資料単位で on/off 可能
 - **カンバン風ボードUI**: アクティビティ → ユーザータスク → ユーザーストーリーの階層をビジュアルに表示
 - **ドラッグ&ドロップ編集**: ストーリーの並び替え、優先度の変更、リリース単位のグルーピング
 - **チーム共有**: 全員で 1 枚のマップを共有。他メンバーの変更・AI ターンは SSE でリアルタイムに反映され、AI ターンは到着順に直列処理される
@@ -66,7 +66,7 @@ app/             配線(ページ / API ルート)
 ```
 
 - **チャット → マップ生成**: `/api/chat` が会話履歴と現在のマップを `infrastructure/agent`(Claude Agent SDK + `json_schema` 構造化出力)に渡し、「返信」+「更新後のマップ全体」を受け取る。AI ターンはグローバルミューテックスで直列化。
-- **コンテキスト**: `/api/contexts` にアップロードされたファイルは 1 ファイル = 1 skill として Markdown 化され(Excel の複数シートはセクションとして保持)、`data/workspace/.claude/skills/<id>/SKILL.md` として保存。AI は description を常時見て、必要なときだけ本文を Read する。ワークスペース外への Read は PreToolUse フックで遮断。
+- **ドメイン知識ベース**: `/api/contexts` にアップロードされたファイルは「ソース(原資料)」として保存され、LLM が固定カテゴリの知識エントリへ抽出(`infrastructure/agent.extractKnowledge`)。エントリは `data/workspace/knowledge.json` に出典付きで蓄積され、カテゴリごとに `data/workspace/.claude/skills/kb-<category>/SKILL.md` へレンダリングされる(description にエントリのタイトル一覧が入る)。AI は description を常時見て、必要なときだけ本文を Read する。ワークスペース外への Read は PreToolUse フックで遮断。
 - **チーム同期**: 変更は `/api/events`(SSE)で全クライアントへ通知(薄い通知 → 再取得)。単一レプリカ前提。
 - **永続化**: マップは `data/storymap.json` にファイル保存(`/api/storymap` の GET/PUT)。
 - **ボード直接編集**: 行動・ストーリーの追加 / 編集 / 削除。変更は必ず `domain` の集約操作を経由し、即 `data/storymap.json` へ保存。

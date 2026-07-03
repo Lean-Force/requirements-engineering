@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import {
-  setContextEnabled,
-  deleteContext,
-  getContextContent,
+  setSourceEnabled,
+  deleteSource,
+  getSourceMarkdown,
 } from "@/infrastructure/context/store";
 import { emit } from "@/infrastructure/events";
 
@@ -12,17 +12,17 @@ interface Params {
   params: { id: string };
 }
 
-// 変換後の内容(Markdown)を取得(パネルでの内容確認用)
+// ソースから抽出されたエントリの閲覧(出典確認用)
 export async function GET(_request: Request, { params }: Params) {
   try {
-    return NextResponse.json(await getContextContent(params.id));
+    return NextResponse.json(await getSourceMarkdown(params.id));
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 404 });
   }
 }
 
-// on/off の切り替え(チーム共有の状態)
+// ソースの on/off(このソース由来の知識を AI に提示するか。チーム共有の状態)
 export async function PATCH(request: Request, { params }: Params) {
   let body: { enabled?: boolean };
   try {
@@ -38,21 +38,21 @@ export async function PATCH(request: Request, { params }: Params) {
   }
 
   try {
-    const docs = await setContextEnabled(params.id, body.enabled);
+    const state = await setSourceEnabled(params.id, body.enabled);
     emit("contexts");
-    return NextResponse.json(docs);
+    return NextResponse.json(state);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 404 });
   }
 }
 
-// 資料の削除(skill ディレクトリごと消す)
+// ソースの削除(原資料と抽出済みエントリごと消す)
 export async function DELETE(_request: Request, { params }: Params) {
   try {
-    const docs = await deleteContext(params.id);
+    const state = await deleteSource(params.id);
     emit("contexts");
-    return NextResponse.json(docs);
+    return NextResponse.json(state);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 404 });

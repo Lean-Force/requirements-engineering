@@ -13,11 +13,16 @@
 //   CLAUDE_LOCAL_AUTH=1       : (ローカル開発向け)このマシンの Claude Code ログインを使う
 //   CHAT_MAX_TURNS            : エージェントループの上限(省略時 24)
 
+import { promises as fs } from "fs";
 import path from "path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { ChatMessage, ChatResponse } from "@/contracts";
+import type {
+  ChatMessage,
+  ChatResponse,
+  KnowledgeCategory,
+} from "@/contracts";
 import type { StoryMap } from "@/domain";
-import { workspaceDir } from "./context/store";
+import { workspaceDir } from "./context/workspace";
 
 /** LLM の接続設定があるか(Bedrock / Anthropic API 直結 / ローカル認証のいずれか) */
 export function isConfigured(): boolean {
@@ -136,6 +141,8 @@ export async function generate(
   skillNames: string[],
 ): Promise<Pick<ChatResponse, "reply" | "storyMap">> {
   const workspace = workspaceDir();
+  // cwd に指定するため、初回チャット時などまだ無ければ作る(無いと spawn に失敗する)
+  await fs.mkdir(workspace, { recursive: true });
   const maxTurns = Number(process.env.CHAT_MAX_TURNS || 24);
 
   const q = query({
@@ -218,6 +225,103 @@ export async function generate(
   }
 
   throw new Error("モデルから有効な応答が得られませんでした");
+}
+
+// ---- ドメイン知識の抽出 -----------------------------------------------------
+
+const EXTRACT_SYSTEM_PROMPT = `あなたは業務資料からドメイン知識を抽出する専門家です。
+User Story Mapping の AI ファシリテーターが参照する「ドメイン知識ベース」を作るため、
+与えられた資料を独立した知識エントリに分解して抽出してください。
+
+# カテゴリ(この5つのみ)
+- terms: 用語・概念の定義(業務用語、システム用語、略語、コード値の意味)
+- actors: 登場人物・役割・システム(誰が/何が関わるか、責務)
+- flows: 業務フロー・ルール・条件(いつ誰が何をするか、順序、分岐条件、承認ルール)
+- data: データ項目・インターフェース定義・制約(項目名、型、必須、値域、フォーマット)
+- background: 背景・目的・課題・要望(ヒアリングで得た不満、ニーズ、導入の狙い)
+
+# 抽出ルール
+1. 1 エントリ = 1 つの独立した知識。title は短く具体的に(後から検索する手がかりになる)。
+2. content は資料の情報を落とさず簡潔な Markdown で。表の情報は表(Markdown テーブル)のまま保つ。
+3. 値域・条件・数値・コード値は原文どおり正確に写す。推測で補完しない。
+4. 資料に無いカテゴリのエントリは作らない(無理に全カテゴリを埋めない)。
+5. 資料のメタ情報(ファイル名、シート名、版数)は知識ではないので抽出しない。`;
+
+const EXTRACT_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["entries"],
+  properties: {
+    entries: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["category", "title", "content"],
+        properties: {
+          category: {
+            type: "string",
+            enum: ["terms", "actors", "flows", "data", "background"],
+          },
+          title: { type: "string" },
+          content: { type: "string" },
+        },
+      },
+    },
+  },
+};
+
+export interface ExtractedEntry {
+  category: KnowledgeCategory;
+  title: string;
+  content: string;
+}
+
+/** 資料(Markdown 化済み)からドメイン知識エントリを抽出する(ツールなし 1 ターン) */
+export async function extractKnowledge(
+  fileName: string,
+  markdown: string,
+): Promise<ExtractedEntry[]> {
+  // cwd に指定するため、まだ無ければ作る(無いと spawn に失敗する)
+  await fs.mkdir(workspaceDir(), { recursive: true });
+  const q = query({
+    prompt: `次の資料からドメイン知識を抽出してください。\n\n# 資料: ${fileName}\n\n${markdown}`,
+    options: {
+      model: process.env.ANTHROPIC_MODEL || undefined,
+      cwd: workspaceDir(),
+      systemPrompt: EXTRACT_SYSTEM_PROMPT,
+      settingSources: [],
+      allowedTools: [],
+      maxTurns: 4,
+      outputFormat: { type: "json_schema", schema: EXTRACT_SCHEMA },
+    },
+  });
+
+  for await (const message of q) {
+    if (message.type !== "result") continue;
+    if (message.subtype === "success") {
+      console.log(
+        JSON.stringify({
+          at: new Date().toISOString(),
+          kind: "extract-usage",
+          fileName,
+          usage: message.usage,
+          costUsd: message.total_cost_usd,
+        }),
+      );
+      const output = message.structured_output as
+        | { entries: ExtractedEntry[] }
+        | undefined;
+      if (!output) throw new Error("知識の抽出結果が得られませんでした");
+      return output.entries;
+    }
+    const errors =
+      "errors" in message && Array.isArray(message.errors)
+        ? message.errors.join(" / ")
+        : message.subtype;
+    throw new Error(`知識の抽出に失敗しました: ${errors}`);
+  }
+  throw new Error("知識の抽出で有効な応答が得られませんでした");
 }
 
 // ---- 内部 ----------------------------------------------------------------

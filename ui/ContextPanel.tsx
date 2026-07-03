@@ -1,10 +1,10 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { ContextDocMeta } from "@/contracts";
+import type { KnowledgeState, SourceMeta } from "@/contracts";
 
 interface Props {
-  docs: ContextDocMeta[];
+  knowledge: KnowledgeState;
   onUpload: (files: FileList) => Promise<string | null>;
   onToggle: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
@@ -12,12 +12,12 @@ interface Props {
 }
 
 interface Viewer {
-  fileName: string;
+  title: string;
   markdown: string | null; // null = 読み込み中
 }
 
 export default function ContextPanel({
-  docs,
+  knowledge,
   onUpload,
   onToggle,
   onDelete,
@@ -30,22 +30,6 @@ export default function ContextPanel({
 
   const pickFiles = () => fileInput.current?.click();
 
-  // ファイル名クリックで変換後の内容を開く
-  const openDoc = async (doc: ContextDocMeta) => {
-    setViewer({ fileName: doc.fileName, markdown: null });
-    try {
-      const res = await fetch(`/api/contexts/${doc.id}`);
-      const data = await res.json();
-      if (!res.ok) {
-        setViewer({ fileName: doc.fileName, markdown: `⚠️ ${data.error ?? "読み込みに失敗しました"}` });
-        return;
-      }
-      setViewer({ fileName: doc.fileName, markdown: data.markdown as string });
-    } catch {
-      setViewer({ fileName: doc.fileName, markdown: "⚠️ 読み込みに失敗しました" });
-    }
-  };
-
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setUploading(true);
@@ -56,12 +40,50 @@ export default function ContextPanel({
     if (fileInput.current) fileInput.current.value = "";
   };
 
-  const enabledCount = docs.filter((d) => d.enabled).length;
+  // 知識カテゴリの内容を開く
+  const openCategory = async (category: string, label: string) => {
+    setViewer({ title: label, markdown: null });
+    try {
+      const res = await fetch(`/api/contexts/knowledge/${category}`);
+      const data = await res.json();
+      setViewer({
+        title: label,
+        markdown: res.ok
+          ? (data.markdown as string)
+          : `⚠️ ${data.error ?? "読み込みに失敗しました"}`,
+      });
+    } catch {
+      setViewer({ title: label, markdown: "⚠️ 読み込みに失敗しました" });
+    }
+  };
+
+  // ソースから抽出されたエントリを開く(出典確認)
+  const openSource = async (source: SourceMeta) => {
+    setViewer({ title: `${source.fileName} からの抽出結果`, markdown: null });
+    try {
+      const res = await fetch(`/api/contexts/${source.id}`);
+      const data = await res.json();
+      setViewer({
+        title: `${source.fileName} からの抽出結果`,
+        markdown: res.ok
+          ? (data.markdown as string)
+          : `⚠️ ${data.error ?? "読み込みに失敗しました"}`,
+      });
+    } catch {
+      setViewer({
+        title: `${source.fileName} からの抽出結果`,
+        markdown: "⚠️ 読み込みに失敗しました",
+      });
+    }
+  };
+
+  const { sources, categories } = knowledge;
+  const totalEntries = categories.reduce((n, c) => n + c.count, 0);
 
   return (
     <div className="context-panel">
       <div className="context-header">
-        <span>コンテキスト({enabledCount}/{docs.length} 有効)</span>
+        <span>ドメイン知識({totalEntries})</span>
         <button className="context-close" onClick={onClose} aria-label="閉じる">
           ×
         </button>
@@ -73,7 +95,9 @@ export default function ContextPanel({
           onClick={pickFiles}
           disabled={uploading}
         >
-          {uploading ? "取り込み中…" : "ファイルを追加(Excel / CSV / PDF / テキスト)"}
+          {uploading
+            ? "AI が知識を抽出しています…"
+            : "資料を追加(Excel / CSV / PDF / テキスト)"}
         </button>
         <input
           ref={fileInput}
@@ -84,50 +108,63 @@ export default function ContextPanel({
           onChange={(e) => handleFiles(e.target.files)}
         />
         <div className="context-hint">
-          追加した資料はチーム全員に共有され、AI が必要と判断したときに参照します。
+          追加した資料から AI がドメイン知識(用語・フロー・制約など)を抽出し、
+          チーム全員で共有します。マップ整理の際に必要な知識だけを参照します。
         </div>
         {error && <div className="context-error">⚠️ {error}</div>}
       </div>
 
       <div className="context-list">
-        {docs.length === 0 && (
+        <div className="context-section-title">知識カテゴリ</div>
+        {categories.map((c) => (
+          <button
+            key={c.category}
+            className="kb-category"
+            onClick={() => openCategory(c.category, c.label)}
+            disabled={c.count === 0}
+          >
+            <span>{c.label}</span>
+            <span className="kb-count">{c.count}</span>
+          </button>
+        ))}
+
+        <div className="context-section-title">取り込み済み資料</div>
+        {sources.length === 0 && (
           <div className="context-empty">
-            まだ資料がありません。要件一覧・業務フロー・議事録・用語集などの
-            Excel / PDF / テキストを追加すると、AI がマップ整理の根拠として参照します。
+            まだ資料がありません。要件一覧・業務フロー・議事録・用語集などを
+            追加すると、AI がドメイン知識に分解して蓄積します。
           </div>
         )}
-
-        {docs.map((d) => (
-          <div key={d.id} className={`context-item${d.enabled ? "" : " off"}`}>
+        {sources.map((s) => (
+          <div key={s.id} className={`context-item${s.enabled ? "" : " off"}`}>
             <div className="context-item-top">
               <div className="context-toggle">
                 <input
                   type="checkbox"
-                  checked={d.enabled}
-                  onChange={(e) => onToggle(d.id, e.target.checked)}
-                  aria-label="AI に提示する"
-                  title="AI に提示する"
+                  checked={s.enabled}
+                  onChange={(e) => onToggle(s.id, e.target.checked)}
+                  aria-label="この資料の知識を AI に提示する"
+                  title="この資料の知識を AI に提示する"
                 />
                 <button
                   className="context-name"
-                  onClick={() => openDoc(d)}
-                  title="内容を表示"
+                  onClick={() => openSource(s)}
+                  title="抽出結果を表示"
                 >
-                  {d.fileName}
+                  {s.fileName}
                 </button>
               </div>
               <button
                 className="context-delete"
-                onClick={() => onDelete(d.id)}
+                onClick={() => onDelete(s.id)}
                 aria-label="削除"
-                title="削除"
+                title="削除(抽出済みの知識も消えます)"
               >
                 ×
               </button>
             </div>
-            <div className="context-desc">{d.description}</div>
             <div className="context-meta">
-              {d.charCount.toLocaleString()} 文字
+              {s.entryCount} 件の知識を抽出
             </div>
           </div>
         ))}
@@ -137,7 +174,7 @@ export default function ContextPanel({
         <div className="context-viewer-backdrop" onClick={() => setViewer(null)}>
           <div className="context-viewer" onClick={(e) => e.stopPropagation()}>
             <div className="context-viewer-header">
-              <span>{viewer.fileName}</span>
+              <span>{viewer.title}</span>
               <button
                 className="context-close"
                 onClick={() => setViewer(null)}

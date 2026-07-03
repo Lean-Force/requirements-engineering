@@ -12,16 +12,18 @@ import type {
   BoardEvent,
   ChatMessage,
   ChatResponse,
-  ContextDocMeta,
+  KnowledgeState,
   SessionState,
   StoryMapVersionMeta,
 } from "@/contracts";
+
+const EMPTY_KNOWLEDGE: KnowledgeState = { sources: [], categories: [] };
 
 export default function Home() {
   const [storyMap, setStoryMap] = useState<StoryMap>(emptyStoryMap());
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [versions, setVersions] = useState<StoryMapVersionMeta[]>([]);
-  const [contexts, setContexts] = useState<ContextDocMeta[]>([]);
+  const [knowledge, setKnowledge] = useState<KnowledgeState>(EMPTY_KNOWLEDGE);
   const [loading, setLoading] = useState(false);
   // 他のメンバーの AI ターンが進行中(SSE の chat:start / chat:end で更新)
   const [remoteBusy, setRemoteBusy] = useState(false);
@@ -53,7 +55,7 @@ export default function Home() {
 
     fetch("/api/contexts")
       .then((r) => r.json())
-      .then((docs: ContextDocMeta[]) => setContexts(docs))
+      .then((state: KnowledgeState) => setKnowledge(state))
       .catch(() => {
         /* 取得失敗時は空のまま */
       });
@@ -98,7 +100,7 @@ export default function Home() {
         case "contexts":
           fetch("/api/contexts")
             .then((r) => r.json())
-            .then((docs: ContextDocMeta[]) => setContexts(docs))
+            .then((state: KnowledgeState) => setKnowledge(state))
             .catch(() => {
               /* 失敗時は手元の一覧のまま */
             });
@@ -219,7 +221,7 @@ export default function Home() {
     });
   }, []);
 
-  // コンテキスト(参照資料)の操作
+  // ドメイン知識(コンテキスト)の操作
   const uploadContexts = useCallback(async (files: FileList): Promise<string | null> => {
     const form = new FormData();
     for (const file of Array.from(files)) form.append("files", file);
@@ -227,7 +229,7 @@ export default function Home() {
       const res = await fetch("/api/contexts", { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) return (data.error as string) ?? "アップロードに失敗しました";
-      setContexts(data as ContextDocMeta[]);
+      setKnowledge(data as KnowledgeState);
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "アップロードに失敗しました";
@@ -236,14 +238,17 @@ export default function Home() {
 
   const toggleContext = useCallback(async (id: string, enabled: boolean) => {
     // 先に画面へ反映し、失敗したらサーバー状態に合わせ直す
-    setContexts((prev) => prev.map((d) => (d.id === id ? { ...d, enabled } : d)));
+    setKnowledge((prev) => ({
+      ...prev,
+      sources: prev.sources.map((s) => (s.id === id ? { ...s, enabled } : s)),
+    }));
     try {
       const res = await fetch(`/api/contexts/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
       });
-      if (res.ok) setContexts((await res.json()) as ContextDocMeta[]);
+      if (res.ok) setKnowledge((await res.json()) as KnowledgeState);
     } catch {
       /* SSE の contexts イベントで整合される */
     }
@@ -252,7 +257,7 @@ export default function Home() {
   const deleteContextDoc = useCallback(async (id: string) => {
     try {
       const res = await fetch(`/api/contexts/${id}`, { method: "DELETE" });
-      if (res.ok) setContexts((await res.json()) as ContextDocMeta[]);
+      if (res.ok) setKnowledge((await res.json()) as KnowledgeState);
     } catch {
       /* SSE の contexts イベントで整合される */
     }
@@ -270,7 +275,10 @@ export default function Home() {
           </div>
           <div className="header-buttons">
             <button className="context-open" onClick={openContexts}>
-              コンテキスト{contexts.length > 0 ? `(${contexts.filter((d) => d.enabled).length})` : ""}
+              ドメイン知識
+              {knowledge.sources.length > 0
+                ? `(${knowledge.categories.reduce((n, c) => n + c.count, 0)})`
+                : ""}
             </button>
             <button className="history-toggle" onClick={openHistory}>
               版履歴{versions.length > 0 ? `(${versions.length})` : ""}
@@ -300,7 +308,7 @@ export default function Home() {
         )}
         {showContexts && (
           <ContextPanel
-            docs={contexts}
+            knowledge={knowledge}
             onUpload={uploadContexts}
             onToggle={toggleContext}
             onDelete={deleteContextDoc}

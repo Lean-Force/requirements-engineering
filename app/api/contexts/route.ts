@@ -1,18 +1,17 @@
 import { NextResponse } from "next/server";
-import {
-  listContexts,
-  addContextsFromFile,
-} from "@/infrastructure/context/store";
+import { getKnowledgeState, addSource } from "@/infrastructure/context/store";
 import { emit } from "@/infrastructure/events";
 
 export const dynamic = "force-dynamic";
+// 取り込み時に LLM でドメイン知識を抽出するため余裕を持たせる
+export const maxDuration = 300;
 
-// コンテキスト(参照資料)の一覧
+// 知識ベースの全体像(ソース一覧 + カテゴリ別エントリ数)
 export async function GET() {
-  return NextResponse.json(await listContexts());
+  return NextResponse.json(await getKnowledgeState());
 }
 
-// ファイルのアップロード(multipart/form-data、files フィールドに複数可)
+// ファイルのアップロード → ドメイン知識の抽出(multipart/form-data、files フィールドに複数可)
 export async function POST(request: Request) {
   let form: FormData;
   try {
@@ -30,13 +29,13 @@ export async function POST(request: Request) {
   }
 
   try {
-    let docs = await listContexts();
+    let state = await getKnowledgeState();
     for (const file of files) {
       const buffer = Buffer.from(await file.arrayBuffer());
-      docs = await addContextsFromFile(file.name, buffer);
+      state = await addSource(file.name, buffer);
     }
     emit("contexts");
-    return NextResponse.json(docs);
+    return NextResponse.json(state);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 400 });

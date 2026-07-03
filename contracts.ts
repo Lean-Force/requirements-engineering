@@ -44,21 +44,52 @@ export interface ChatResponse {
 }
 
 /**
- * アップロードされた参照資料(コンテキスト)1 件のメタ情報。
- * 1 ファイル = 1 件。実体は Agent Skill(SKILL.md)としてワークスペースに
- * 保存され、AI が必要と判断したときだけ本文を読む(progressive disclosure)。
- * Excel の複数シートは SKILL.md 内のセクションとして保持される。
+ * ドメイン知識のカテゴリ(固定タクソノミー)。
+ * カテゴリごとに 1 つの Agent Skill(kb-*)としてレンダリングされ、
+ * AI は description(エントリのタイトル一覧)を見て必要なときだけ読む。
  */
-export interface ContextDocMeta {
-  /** skill 名を兼ねる(ディレクトリ名 = SKILL.md の name) */
+export type KnowledgeCategory =
+  | "terms" // 用語集
+  | "actors" // アクター(登場人物・役割・システム)
+  | "flows" // 業務フロー・ルール
+  | "data" // データ・IF定義
+  | "background"; // 背景・課題
+
+/** 取り込まれた原資料(ソース)のメタ情報 */
+export interface SourceMeta {
   id: string;
   fileName: string;
-  /** AI に常駐提示される 1 行説明 */
-  description: string;
-  /** プロンプトに含めるか(チーム共有の状態) */
+  /** このソース由来の知識を AI に提示するか(チーム共有の状態) */
   enabled: boolean;
-  charCount: number;
+  /** 抽出されたエントリ数 */
+  entryCount: number;
   uploadedAt: string;
+}
+
+/** ソースから抽出されたドメイン知識の 1 エントリ */
+export interface KnowledgeEntry {
+  id: string;
+  category: KnowledgeCategory;
+  /** 短い見出し(検索・トリガーの手がかり) */
+  title: string;
+  /** 本文(Markdown)。値域・条件などは原文どおり */
+  content: string;
+  /** 出典ソース */
+  sourceId: string;
+}
+
+/** カテゴリの一覧表示用サマリ */
+export interface KnowledgeCategorySummary {
+  category: KnowledgeCategory;
+  label: string;
+  /** 有効なソース由来のエントリ数 */
+  count: number;
+}
+
+/** /api/contexts 系のレスポンス(知識ベースの全体像) */
+export interface KnowledgeState {
+  sources: SourceMeta[];
+  categories: KnowledgeCategorySummary[];
 }
 
 /** サーバーから push されるボード同期イベント(SSE) */

@@ -169,3 +169,9 @@ body,html{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
 .story-modal-save:hover{filter:brightness(1.05)}
 .story-modal-delete{padding:6px 14px;font-size:13px;border:1px solid #e5b9b5;border-radius:8px;background:var(--panel);color:#b3261e;cursor:pointer}
 .story-modal-delete:hover{background:#fdeceb;border-color:#b3261e}
+.context-section-title{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.05em;margin:4px 0 -2px}
+.kb-category{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg);font-size:13px;font-weight:600;color:var(--text);cursor:pointer;text-align:left}
+.kb-category:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.kb-category:disabled{opacity:.45;cursor:default}
+.kb-count{font-size:12px;font-weight:600;color:var(--muted);background:var(--panel);border:1px solid var(--border);border-radius:999px;padding:1px 9px}
+.kb-category:hover:not(:disabled) .kb-count{color:var(--accent);border-color:var(--accent)}
