@@ -45,6 +45,27 @@ export interface ChatResponse {
   usedSkills?: string[];
 }
 
+/** 付箋(行動 / ストーリー)の AI 校正リクエスト(/api/boards/[id]/refine) */
+export interface RefineRequest {
+  kind: "action" | "story";
+  /** 現在の本文 */
+  text: string;
+  /** 付箋のアクター名(ストーリーの主語・行動の主体) */
+  actorName?: string;
+  /** 同じ場面(アクティビティ)にある行動の本文一覧(文脈用) */
+  sceneActions?: string[];
+  /** ストーリーがぶら下がる行動の本文(kind = story のとき) */
+  actionText?: string;
+}
+
+/** AI 校正のレスポンス */
+export interface RefineResponse {
+  /** 付箋にそのまま入れられる推敲後の本文 */
+  suggestion: string;
+  /** 何を直したか・その根拠(1〜2文) */
+  note: string;
+}
+
 /**
  * ドメイン知識のカテゴリ(固定タクソノミー)。
  * カテゴリごとに 1 つの Agent Skill(kb-*)としてレンダリングされ、

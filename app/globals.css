@@ -255,3 +255,16 @@ body,html{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
 .board-switcher-knowledge:hover{color:var(--accent);background:var(--accent-soft)}
 .knowledge-admin-list{max-width:720px}
 .board-list-header .sub a{color:var(--accent)}
+.story-modal-actions-left{display:flex;gap:8px;align-items:center}
+.story-modal-refine{border:1px solid var(--accent);background:#fff;color:var(--accent);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer}
+.story-modal-refine:hover:not(:disabled){background:var(--accent);color:#fff}
+.story-modal-refine:disabled{opacity:.5;cursor:progress}
+.story-modal-proposal{border:1px solid var(--accent);border-radius:10px;padding:10px 12px;background:#f6f5ff;display:flex;flex-direction:column;gap:6px}
+.story-modal-proposal-title{font-size:12px;font-weight:600;color:var(--accent)}
+.story-modal-proposal-text{font-size:13px;white-space:pre-wrap}
+.story-modal-proposal-note{font-size:11px;color:var(--muted)}
+.story-modal-proposal-actions{display:flex;gap:8px}
+.story-modal-proposal-apply{border:none;background:var(--accent);color:#fff;border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer}
+.story-modal-proposal-apply:hover{opacity:.9}
+.story-modal-proposal-dismiss{border:1px solid var(--border);background:#fff;border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer;color:var(--muted)}
+.story-modal-error{font-size:12px;color:#b91c1c}

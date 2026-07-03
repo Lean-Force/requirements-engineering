@@ -41,3 +41,17 @@ export const EXTRACT_SCHEMA: Record<string, unknown> = {
     },
   },
 };
+
+/** 付箋校正(refine)の構造化出力スキーマ */
+export const REFINE_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["suggestion", "note"],
+  properties: {
+    suggestion: {
+      type: "string",
+      description: "付箋にそのまま入れられる推敲後の本文",
+    },
+    note: { type: "string", description: "何をなぜ直したかの短い説明(日本語1〜2文)" },
+  },
+};

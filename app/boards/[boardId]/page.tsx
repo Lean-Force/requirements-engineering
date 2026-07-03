@@ -17,6 +17,8 @@ import type {
   ChatMessage,
   ChatResponse,
   KnowledgeState,
+  RefineRequest,
+  RefineResponse,
   SessionState,
   StoryMapVersionMeta,
 } from "@/contracts";
@@ -303,6 +305,25 @@ export default function BoardPage({ params }: Props) {
     });
   }, [api]);
 
+  // 付箋(行動 / ストーリー)の AI 校正(マップは変えない。提案を返すだけ)
+  const refineCard = useCallback(
+    async (req: RefineRequest): Promise<RefineResponse | { error: string }> => {
+      try {
+        const res = await fetch(`${api}/refine`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(req),
+        });
+        const data = await res.json();
+        if (!res.ok) return { error: (data.error as string) ?? "校正に失敗しました" };
+        return data as RefineResponse;
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : "校正に失敗しました" };
+      }
+    },
+    [api],
+  );
+
   // ドメイン知識(コンテキスト)の操作
   const uploadContexts = useCallback(
     async (files: FileList): Promise<string | null> => {
@@ -443,6 +464,7 @@ export default function BoardPage({ params }: Props) {
                 storyMap={storyMap}
                 onChange={updateStoryMap}
                 onPickTarget={setSelectedTarget}
+                onRefine={refineCard}
               />
             </PanZoom>
           ) : (

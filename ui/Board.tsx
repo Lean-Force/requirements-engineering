@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import type { StoryMap } from "@/domain";
 import * as domain from "@/domain";
+import type { RefineRequest, RefineResponse } from "@/contracts";
 import CardEditModal from "./CardEditModal";
 
 /** 📌 でチャットの対象に選ばれた付箋(ストーリーまたは行動) */
@@ -17,6 +18,8 @@ interface Props {
   onChange: (next: StoryMap) => void;
   /** 付箋の 📌 で「チャットの対象」に選ぶ(未指定ならボタン非表示) */
   onPickTarget?: (pick: PickTarget) => void;
+  /** 付箋の AI 校正(未指定ならモーダルにボタンが出ない) */
+  onRefine?: (req: RefineRequest) => Promise<RefineResponse | { error: string }>;
 }
 
 // インライン編集状態(ストーリー / 行動 / アクターを単一の状態で扱う)。
@@ -107,7 +110,7 @@ function noteFontSize(text: string): number {
 
 type Activity = StoryMap["activities"][number];
 
-export default function Board({ storyMap, onChange, onPickTarget }: Props) {
+export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Props) {
   const { actors, activities } = storyMap;
 
   // ストーリーの D&D 並び替え(同じ列 = 場面内で上下自由。所属・色は変えない)。
@@ -636,6 +639,21 @@ export default function Board({ storyMap, onChange, onPickTarget }: Props) {
             commitEditStory(editor.activityId, editor.actionId, editor.storyId, t, fixed)
           }
           onCancel={() => setEditor(null)}
+          onRefine={
+            onRefine &&
+            ((text) => {
+              const activity = activities.find((a) => a.id === editor.activityId);
+              const action = activity?.actions.find((x) => x.id === editor.actionId);
+              const actor = actors.find((x) => x.id === action?.actorId);
+              return onRefine({
+                kind: "story",
+                text,
+                actorName: actor?.name,
+                sceneActions: activity?.actions.map((x) => x.text),
+                actionText: action?.text,
+              });
+            })
+          }
         />
       )}
       {editor?.mode === "action-edit" && (
@@ -654,6 +672,20 @@ export default function Board({ storyMap, onChange, onPickTarget }: Props) {
             commitEditAction(editor.activityId, editor.actionId, t, fixed)
           }
           onCancel={() => setEditor(null)}
+          onRefine={
+            onRefine &&
+            ((text) => {
+              const activity = activities.find((a) => a.id === editor.activityId);
+              const action = activity?.actions.find((x) => x.id === editor.actionId);
+              const actor = actors.find((x) => x.id === action?.actorId);
+              return onRefine({
+                kind: "action",
+                text,
+                actorName: actor?.name,
+                sceneActions: activity?.actions.map((x) => x.text),
+              });
+            })
+          }
         />
       )}
     </div>

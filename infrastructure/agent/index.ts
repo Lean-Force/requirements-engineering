@@ -20,16 +20,23 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import type { HookInput } from "@anthropic-ai/claude-agent-sdk";
 import type {
   ChatMessage,
   ChatResponse,
   KnowledgeCategory,
+  RefineRequest,
+  RefineResponse,
 } from "@/contracts";
 import type { StoryMap } from "@/domain";
 import { dataRoot, workspaceDir } from "../context/workspace";
 import { boardToolsServer } from "./board-tools";
-import { EXTRACT_SYSTEM_PROMPT, SYSTEM_PROMPT } from "./prompts";
-import { CHAT_OUTPUT_SCHEMA, EXTRACT_SCHEMA } from "./schema";
+import {
+  EXTRACT_SYSTEM_PROMPT,
+  REFINE_SYSTEM_PROMPT,
+  SYSTEM_PROMPT,
+} from "./prompts";
+import { CHAT_OUTPUT_SCHEMA, EXTRACT_SCHEMA, REFINE_SCHEMA } from "./schema";
 
 /** LLM の接続設定があるか(Bedrock / Anthropic API 直結 / ローカル認証のいずれか) */
 export function isConfigured(): boolean {
@@ -87,32 +94,7 @@ export async function generate(
       // ファイルを指せるため、対象パスを検査して deny する)。
       // allowedTools のツールは canUseTool より先に自動許可されるため、
       // すべての呼び出しに介入できる PreToolUse フックで検査する。
-      hooks: {
-        PreToolUse: [
-          {
-            hooks: [
-              async (input) => {
-                if (input.hook_event_name !== "PreToolUse") return {};
-                const target = pathOf(
-                  input.tool_name,
-                  (input.tool_input ?? {}) as Record<string, unknown>,
-                );
-                if (target !== null && !isInside(workspace, target)) {
-                  return {
-                    hookSpecificOutput: {
-                      hookEventName: "PreToolUse" as const,
-                      permissionDecision: "deny" as const,
-                      permissionDecisionReason:
-                        "ワークスペース外のファイルへはアクセスできません",
-                    },
-                  };
-                }
-                return {};
-              },
-            ],
-          },
-        ],
-      },
+      hooks: workspaceGuard(workspace),
     },
   });
 
@@ -169,6 +151,73 @@ export async function generate(
   }
 
   throw new Error("モデルから有効な応答が得られませんでした");
+}
+
+// ---- 付箋の校正(推敲) -----------------------------------------------------
+
+/**
+ * 付箋(行動 / ストーリー)1 枚の本文を推奨形式・ドメイン知識(用語)に沿って推敲する。
+ * skillNames はチャットと同じ(prepareSkillsForChat の結果)を渡す。
+ */
+export async function refineCard(
+  boardId: string,
+  req: RefineRequest,
+  skillNames: string[],
+): Promise<RefineResponse> {
+  const workspace = workspaceDir(boardId);
+  await fs.mkdir(workspace, { recursive: true });
+
+  const kindLabel = req.kind === "story" ? "ストーリー" : "行動";
+  const context = [
+    req.actorName ? `アクター: ${req.actorName}` : null,
+    req.sceneActions?.length
+      ? `同じ場面の行動: ${req.sceneActions.join(" / ")}`
+      : null,
+    req.actionText ? `ぶら下がっている行動: ${req.actionText}` : null,
+  ]
+    .filter((s): s is string => s !== null)
+    .join("\n");
+
+  const q = query({
+    prompt: `次の${kindLabel}の付箋を推敲してください。\n\n${context}\n\n本文:\n${req.text}`,
+    options: {
+      model: process.env.ANTHROPIC_MODEL || undefined,
+      cwd: workspace,
+      systemPrompt: REFINE_SYSTEM_PROMPT,
+      settingSources: ["project"],
+      skills: skillNames,
+      // 用語合わせのために知識を読む以外の行動はさせない
+      allowedTools: ["Read", "Glob", "Grep"],
+      maxTurns: 8,
+      outputFormat: { type: "json_schema", schema: REFINE_SCHEMA },
+      hooks: workspaceGuard(workspace),
+    },
+  });
+
+  for await (const message of q) {
+    if (message.type !== "result") continue;
+    if (message.subtype === "success") {
+      console.log(
+        JSON.stringify({
+          at: new Date().toISOString(),
+          kind: "refine-usage",
+          turns: message.num_turns,
+          durationMs: message.duration_ms,
+          usage: message.usage,
+          costUsd: message.total_cost_usd,
+        }),
+      );
+      const output = message.structured_output as RefineResponse | undefined;
+      if (!output) throw new Error("校正結果が得られませんでした");
+      return output;
+    }
+    const errors =
+      "errors" in message && Array.isArray(message.errors)
+        ? message.errors.join(" / ")
+        : message.subtype;
+    throw new Error(`校正に失敗しました: ${errors}`);
+  }
+  throw new Error("校正で有効な応答が得られませんでした");
 }
 
 // ---- ドメイン知識の抽出 -----------------------------------------------------
@@ -230,6 +279,40 @@ export async function extractKnowledge(
 }
 
 // ---- 内部 ----------------------------------------------------------------
+
+/**
+ * ワークスペース外の読み取りを遮断する PreToolUse フック。
+ * allowedTools のツールは canUseTool より先に自動許可されるため、
+ * すべての呼び出しに介入できる PreToolUse で検査する。
+ */
+function workspaceGuard(workspace: string) {
+  return {
+    PreToolUse: [
+      {
+        hooks: [
+          async (input: HookInput) => {
+            if (input.hook_event_name !== "PreToolUse") return {};
+            const target = pathOf(
+              input.tool_name,
+              (input.tool_input ?? {}) as Record<string, unknown>,
+            );
+            if (target !== null && !isInside(workspace, target)) {
+              return {
+                hookSpecificOutput: {
+                  hookEventName: "PreToolUse" as const,
+                  permissionDecision: "deny" as const,
+                  permissionDecisionReason:
+                    "ワークスペース外のファイルへはアクセスできません",
+                },
+              };
+            }
+            return {};
+          },
+        ],
+      },
+    ],
+  };
+}
 
 /** ツール入力からアクセス対象パスを取り出す(該当しないツールは null) */
 function pathOf(toolName: string, input: Record<string, unknown>): string | null {
