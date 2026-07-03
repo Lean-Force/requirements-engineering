@@ -15,6 +15,7 @@ import {
 } from "./activity";
 import {
   withText as renameActionText,
+  withActionFixed,
   withNewStory,
   withRenamedStory,
   withoutStory,
@@ -50,6 +51,8 @@ export function normalizeStoryMap(map: StoryMap): StoryMap {
       id: a.id,
       actorId: validIds.has(a.actorId) ? a.actorId : fallbackId,
       text: a.text,
+      // 確定フラグは true のときだけ保持(JSON を汚さない)
+      ...(a.fixed === true ? { fixed: true as const } : {}),
       stories: (a.stories ?? []).map((st) => ({
         id: st.id,
         text: st.text,
@@ -196,6 +199,100 @@ export function setStoryFixed(
   return mapActivity(map, activityId, (act) =>
     mapAction(act, actionId, (a) => withStoryFixed(a, storyId, fixed)),
   );
+}
+
+/** 行動(バックボーンの付箋)の確定(fix)状態を切り替える */
+export function setActionFixed(
+  map: StoryMap,
+  activityId: string,
+  actionId: string,
+  fixed: boolean,
+): StoryMap {
+  return mapActivity(map, activityId, (act) =>
+    mapAction(act, actionId, (a) => withActionFixed(a, fixed)),
+  );
+}
+
+/**
+ * 確定(fixed)要素の保護を強制する純粋関数(サーバー側の最終防衛線)。
+ * AI の出力(after)が確定済みの行動・ストーリーを変更・削除していた場合、
+ * 変更前(before)の内容へ復元する。先に行動を復元してからストーリーを復元する
+ * (消された行動が戻れば、その配下の確定ストーリーの復元先も戻るため)。
+ */
+export function enforceFixed(before: StoryMap, after: StoryMap): StoryMap {
+  return enforceFixedStories(before, enforceFixedActions(before, after));
+}
+
+/**
+ * 確定(fixed)行動(バックボーンの付箋)の保護。
+ * 本文・アクター・確定フラグを守る(別アクティビティへの移動は許容)。
+ * 消されていた場合は元のアクティビティへ配下ストーリーごと復元する。
+ */
+export function enforceFixedActions(before: StoryMap, after: StoryMap): StoryMap {
+  const fixedActions: { action: Action; activity: Activity }[] = [];
+  for (const activity of before.activities) {
+    for (const action of activity.actions) {
+      if (action.fixed === true) fixedActions.push({ action, activity });
+    }
+  }
+  if (fixedActions.length === 0) return after;
+
+  let result = after;
+  for (const { action, activity } of fixedActions) {
+    result = restoreFixedAction(result, action, activity);
+  }
+  return result;
+}
+
+function restoreFixedAction(
+  map: StoryMap,
+  original: Action,
+  originalActivity: Activity,
+): StoryMap {
+  // 出力側のどこかに残っているか探す(移動は許容し、本文・アクター・フラグだけ守る)
+  for (const activity of map.activities) {
+    const found = activity.actions.find((a) => a.id === original.id);
+    if (found) {
+      return {
+        ...map,
+        activities: map.activities.map((act) =>
+          act.id !== activity.id
+            ? act
+            : {
+                ...act,
+                actions: act.actions.map((a) =>
+                  a.id !== original.id
+                    ? a
+                    : {
+                        ...a,
+                        text: original.text,
+                        actorId: original.actorId,
+                        fixed: true,
+                      },
+                ),
+              },
+        ),
+      };
+    }
+  }
+
+  // 消されていた場合: 元の activity → 無ければ activity ごと末尾に復元(配下ストーリーごと)
+  const revived: Action = { ...original, stories: original.stories.map((s) => ({ ...s })) };
+  const sameActivity = map.activities.find((a) => a.id === originalActivity.id);
+  if (sameActivity) {
+    return {
+      ...map,
+      activities: map.activities.map((act) =>
+        act.id !== originalActivity.id
+          ? act
+          : { ...act, actions: [...act.actions, revived] },
+      ),
+    };
+  }
+  return {
+    ...map,
+    activities: [...map.activities, { ...originalActivity, actions: [revived] }],
+  };
 }
 
 /**

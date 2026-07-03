@@ -18,7 +18,7 @@ type Editor =
   | { mode: "story-add"; activityId: string; actionId: string } // 新規ストーリーを入力中
   | { mode: "story-edit"; activityId: string; actionId: string; storyId: string; initial: string; initialFixed: boolean }
   | { mode: "action-add"; activityId: string; actorId: string } // 空セルに行動を入力中
-  | { mode: "action-edit"; activityId: string; actionId: string; initial: string }
+  | { mode: "action-edit"; activityId: string; actionId: string; initial: string; initialFixed: boolean }
   | { mode: "actor-add" }; // 新規アクター名を入力中
 
 // その場入力用の汎用フィールド。Enter 保存 / Esc 取消 / フォーカスを外すと保存。
@@ -75,16 +75,18 @@ function InlineInput({
   return multiline ? <textarea {...common} /> : <input {...common} />;
 }
 
-// ストーリー編集モーダル。Cmd/Ctrl+Enter 保存 / Esc 取消。空で保存すると削除。
+// 付箋(行動 / ストーリー)編集モーダル。Cmd/Ctrl+Enter 保存 / Esc 取消。空で保存すると削除。
 // 確定(fix)中は本文編集・削除を無効化する(先に確定を解除する)。
 // PanZoom の transform の影響を受けないよう body へポータルで出す。
-function StoryEditModal({
+function CardEditModal({
+  kind,
   initial,
   initialFixed,
   color,
   onCommit,
   onCancel,
 }: {
+  kind: "action" | "story";
   initial: string;
   initialFixed: boolean;
   color: { bg: string; border: string };
@@ -93,6 +95,15 @@ function StoryEditModal({
 }) {
   const [text, setText] = useState(initial);
   const [fixed, setFixed] = useState(initialFixed);
+  const title = kind === "action" ? "行動を編集" : "ストーリーを編集";
+  const placeholder =
+    kind === "action"
+      ? "行動(例: 商品を受け取る)"
+      : "ストーリー(例: 店員は…したい。なぜなら…だからだ。)";
+  const recommendHint =
+    kind === "action"
+      ? "短く具体的な行動表現を推奨(例:「レジに立つ」)。⌘/Ctrl + Enter で保存"
+      : "「(アクター)は〜したい。なぜなら〜だからだ。」の形を推奨。⌘/Ctrl + Enter で保存";
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
       e.preventDefault();
@@ -106,7 +117,7 @@ function StoryEditModal({
     <div className="story-modal-backdrop" onClick={onCancel}>
       <div className="story-modal" onClick={(e) => e.stopPropagation()}>
         <div className="story-modal-header">
-          <span>ストーリーを編集</span>
+          <span>{title}</span>
           <button className="story-modal-close" onClick={onCancel} aria-label="閉じる">
             ×
           </button>
@@ -118,7 +129,7 @@ function StoryEditModal({
           rows={5}
           value={text}
           disabled={fixed}
-          placeholder="ストーリー(例: 店員は…したい。なぜなら…だからだ。)"
+          placeholder={placeholder}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
         />
@@ -133,7 +144,7 @@ function StoryEditModal({
         <div className="story-modal-hint">
           {fixed
             ? "確定中は本文の編集と削除ができません。変更するには先に確定を外してください。"
-            : "「(アクター)は〜したい。なぜなら〜だからだ。」の形を推奨。⌘/Ctrl + Enter で保存"}
+            : recommendHint}
         </div>
         <div className="story-modal-actions">
           <button
@@ -228,12 +239,32 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
     if (text.trim()) onChange(domain.addAction(storyMap, activityId, actorId, text.trim()));
   };
 
-  const commitEditAction = (activityId: string, actionId: string, text: string) => {
+  const commitEditAction = (
+    activityId: string,
+    actionId: string,
+    text: string,
+    fixed: boolean,
+  ) => {
     setEditor(null);
+    if (!text.trim()) {
+      // 空 = 削除(確定中はモーダル側で無効化されている)。配下ストーリーがあれば確認。
+      const storyCount =
+        domain.findAction(storyMap, activityId, actionId)?.stories.length ?? 0;
+      if (
+        storyCount === 0 ||
+        window.confirm("この行動を削除しますか?配下のストーリーも消えます。")
+      ) {
+        onChange(domain.removeAction(storyMap, activityId, actionId));
+      }
+      return;
+    }
     onChange(
-      text.trim()
-        ? domain.renameAction(storyMap, activityId, actionId, text.trim())
-        : domain.removeAction(storyMap, activityId, actionId),
+      domain.setActionFixed(
+        domain.renameAction(storyMap, activityId, actionId, text.trim()),
+        activityId,
+        actionId,
+        fixed,
+      ),
     );
   };
 
@@ -346,24 +377,12 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
                             ＋
                           </button>
 
-                          {editor?.mode === "action-edit" &&
-                          action &&
-                          editor.actionId === action.id ? (
-                            <InlineInput
-                              multiline
-                              className="note-input"
-                              color={color}
-                              initial={editor.initial}
-                              placeholder="行動(空にすると削除)"
-                              onCommit={(t) => commitEditAction(activity.id, action.id, t)}
-                              onCancel={() => setEditor(null)}
-                            />
-                          ) : action ? (
+                          {action ? (
                             <div
-                              className="note clickable"
+                              className={`note clickable${action.fixed ? " fixed" : ""}`}
                               data-action-id={action.id}
                               data-activity-id={activity.id}
-                              title={action.text}
+                              title={action.fixed ? `🔒 確定済み: ${action.text}` : action.text}
                               style={{ background: color.bg, borderColor: color.border }}
                               onClick={() =>
                                 setEditor({
@@ -371,22 +390,26 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
                                   activityId: activity.id,
                                   actionId: action.id,
                                   initial: action.text,
+                                  initialFixed: action.fixed === true,
                                 })
                               }
                             >
                               <span style={{ fontSize: noteFontSize(action.text) }}>
+                                {action.fixed && <span className="story-lock">🔒</span>}
                                 {action.text}
                               </span>
-                              <button
-                                className="del-note"
-                                title="この行動を削除"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  removeActionCard(activity.id, action.id, action.stories.length);
-                                }}
-                              >
-                                ×
-                              </button>
+                              {!action.fixed && (
+                                <button
+                                  className="del-note"
+                                  title="この行動を削除"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeActionCard(activity.id, action.id, action.stories.length);
+                                  }}
+                                >
+                                  ×
+                                </button>
+                              )}
                             </div>
                           ) : editor?.mode === "action-add" &&
                             editor.activityId === activity.id &&
@@ -594,9 +617,10 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
         </div>
       )}
 
-      {/* ストーリー編集モーダル(body へポータル) */}
+      {/* 付箋編集モーダル(body へポータル) */}
       {editor?.mode === "story-edit" && (
-        <StoryEditModal
+        <CardEditModal
+          kind="story"
           key={editor.storyId}
           initial={editor.initial}
           initialFixed={editor.initialFixed}
@@ -608,6 +632,24 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
           })()}
           onCommit={(t, fixed) =>
             commitEditStory(editor.activityId, editor.actionId, editor.storyId, t, fixed)
+          }
+          onCancel={() => setEditor(null)}
+        />
+      )}
+      {editor?.mode === "action-edit" && (
+        <CardEditModal
+          kind="action"
+          key={editor.actionId}
+          initial={editor.initial}
+          initialFixed={editor.initialFixed}
+          color={(() => {
+            const activity = activities.find((a) => a.id === editor.activityId);
+            return activity
+              ? actorColorByAction(activity, editor.actionId)
+              : ACTOR_COLORS[0];
+          })()}
+          onCommit={(t, fixed) =>
+            commitEditAction(editor.activityId, editor.actionId, t, fixed)
           }
           onCancel={() => setEditor(null)}
         />

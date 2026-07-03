@@ -110,10 +110,11 @@ When(
 When(
   "付箋 {string} をクリックして {string} に変更する",
   async function (this: UsmWorld, oldText: string, newText: string) {
+    // クリックで編集モーダルが開く(インライン編集から変更)
     await this.page.locator(".note", { hasText: oldText }).click();
-    const input = this.page.locator(".note-input");
+    const input = this.page.locator(".story-modal-input");
     await input.fill(newText);
-    await withSave(this, () => input.press("Enter"));
+    await withSave(this, () => this.page.locator(".story-modal-save").click());
     await expect(this.page.locator(".note", { hasText: newText })).toBeVisible();
   },
 );
@@ -122,9 +123,11 @@ When(
   "付箋 {string} をクリックして空にする",
   async function (this: UsmWorld, text: string) {
     await this.page.locator(".note", { hasText: text }).click();
-    const input = this.page.locator(".note-input");
+    const input = this.page.locator(".story-modal-input");
     await input.fill("");
-    await withSave(this, () => input.press("Enter"));
+    // 空で保存 = 削除。配下ストーリーがあると確認ダイアログが出る
+    this.page.once("dialog", (d) => d.accept());
+    await withSave(this, () => this.page.locator(".story-modal-save").click());
   },
 );
 

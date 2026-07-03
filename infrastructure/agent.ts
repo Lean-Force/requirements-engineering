@@ -69,7 +69,7 @@ const SYSTEM_PROMPT = `あなたは User Story Mapping(USM)の専門ファシリ
 2. 既存要素の id は絶対に変えない。新規要素には新しい一意な id を付ける(例: "actor-clerk", "activity-3", "action-pay")。
 3. 各 action.actorId は必ず既存の actors のいずれかを指す。新しい登場人物が出たら actors に追加する。
 4. activities は時系列順(配列の並び順が左→右)。順序が重要。
-5. "fixed": true のストーリーは「チームが合意して確定した」ものである。本文の変更・削除は絶対にしない(fixed フラグごとそのまま返す)。ユーザーが確定ストーリーの変更を求めたら、変更せず reply で「確定済みのため、先に確定を解除してください」と案内する。fixed を自分から付けたり外したりしない。
+5. "fixed": true の要素(行動・ストーリー)は「チームが合意して確定した」ものである。本文・アクターの変更や削除は絶対にしない(fixed フラグごとそのまま返す)。ユーザーが確定要素の変更を求めたら、変更せず reply で「確定済みのため、先に確定を解除してください」と案内する。fixed を自分から付けたり外したりしない。
 6. reply は日本語で簡潔に。マップへ加えた変更点を箇条書き的に説明する。長文の解説は不要。参照資料を使った場合はどれを参照したか一言添える。`;
 
 // 構造化出力のスキーマ(reply + 更新後マップ)。domain の StoryMap と同形。
@@ -111,6 +111,7 @@ const CHAT_OUTPUT_SCHEMA: Record<string, unknown> = {
                     id: { type: "string" },
                     actorId: { type: "string" },
                     text: { type: "string" },
+                    fixed: { type: "boolean" },
                     stories: {
                       type: "array",
                       items: {

@@ -233,3 +233,4 @@ body,html{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
 .story-modal-fixed input{accent-color:var(--accent)}
 .story-modal-input:disabled{opacity:.75;cursor:not-allowed}
 .story-modal-delete:disabled{opacity:.4;cursor:not-allowed}
+.note.fixed{border-width:2px;box-shadow:0 1px 4px rgba(0,0,0,.22)}

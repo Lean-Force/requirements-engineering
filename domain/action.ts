@@ -8,6 +8,8 @@ export interface Action {
   /** どのアクターの行動か(Actor.id) */
   actorId: string;
   text: string;
+  /** 確定(チーム合意済み)。true の行動は AI が変更・削除できない */
+  fixed?: boolean;
   /** この行動にぶら下がるストーリー(時系列に左→右) */
   stories: Story[];
 }
@@ -20,6 +22,13 @@ export function createAction(actorId: string, text: string): Action {
 
 export function withText(action: Action, text: string): Action {
   return { ...action, text };
+}
+
+/** 確定状態を切り替えた新しい Action を返す(イミュータブル) */
+export function withActionFixed(action: Action, fixed: boolean): Action {
+  const { fixed: _omit, ...rest } = action;
+  void _omit;
+  return fixed ? { ...rest, fixed: true } : rest;
 }
 
 export function withNewStory(action: Action, text: string): Action {
