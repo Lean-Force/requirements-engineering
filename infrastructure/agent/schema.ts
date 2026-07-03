@@ -24,7 +24,7 @@ export const EXTRACT_SCHEMA: Record<string, unknown> = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["category", "title", "content"],
+        required: ["category", "title", "content", "common"],
         properties: {
           category: {
             type: "string",
@@ -32,6 +32,10 @@ export const EXTRACT_SCHEMA: Record<string, unknown> = {
           },
           title: { type: "string" },
           content: { type: "string" },
+          common: {
+            type: "boolean",
+            description: "true = 業務横断で通用する共通知識(全社用語・組織・共通規程など)",
+          },
         },
       },
     },

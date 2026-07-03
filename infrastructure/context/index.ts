@@ -10,9 +10,8 @@ export {
   getCategoryMarkdown,
   getKnowledgeState,
   getSourceMarkdown,
-  moveSource,
   reextractSource,
   setSourceEnabled,
 } from "./knowledge";
-export { prepareSkillsForChat } from "./skills";
+export { prepareSkillsForChat, renderCommonSkills } from "./skills";
 export { COMMON_SCOPE, dataRoot, workspaceDir } from "./workspace";

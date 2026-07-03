@@ -1,15 +1,19 @@
 // ドメイン知識ベースのユースケース。
 //
-// アップロードされたファイルは「ソース(原資料)」として保存され、LLM が
-// 固定カテゴリのドメイン知識エントリへ抽出・分解する(agent.extractKnowledge)。
-// 永続化は repository.ts、AI 向けビュー(SKILL.md)のレンダリングは skills.ts が担う。
+// アップロードされたファイルは「ソース(原資料)」としてアップロードした場所
+// (ボード or 共通管理画面 = _common)に保存され、LLM が固定カテゴリの
+// ドメイン知識エントリへ抽出・分解する(agent.extractKnowledge)。
+// その際、各エントリが業務固有か業務横断(common)かを AI が自動判定する。
+// ユーザーはアップロード時にスコープを意識しない。
 //
 //   workspaces/<boardId>/
 //     sources.json / knowledge.json / sources/<id>/<原ファイル>
-//     .claude/skills/kb-<cat>/SKILL.md        ← このボード(業務)の知識
+//     .claude/skills/kb-<cat>/SKILL.md        ← このボードの業務固有知識
 //     .claude/skills/kb-common-<cat>/SKILL.md ← チャット直前に _common から同期コピー
-//   workspaces/_common/                        ← 業務横断の共通知識(正本)
+//   workspaces/_common/
+//     .claude/skills/kb-common-<cat>/SKILL.md ← 全スコープの common エントリの合成(正本)
 //
+// 永続化は repository.ts、AI 向けビュー(SKILL.md)のレンダリングは skills.ts が担う。
 // エントリは出典(sourceId)を保持する。同じタイトルが複数ソースから来た場合は
 // 両論併記で出典を明示する(勝手に統合して情報を落とさない)。
 
@@ -21,9 +25,9 @@ import type {
   SourceMeta,
 } from "@/contracts";
 import { extractKnowledge } from "../agent";
+import { listBoards } from "../boards";
 import { isSupportedFile, parseFile } from "./parse";
 import {
-  moveSourceDir,
   readEntries,
   readOriginal,
   readSources,
@@ -33,63 +37,61 @@ import {
   sourcesFile,
   writeJson,
 } from "./repository";
-import { CATEGORIES, renderCategoryBody, renderSkills } from "./skills";
+import {
+  CATEGORIES,
+  renderCategoryBody,
+  renderCommonSkills,
+  renderSkills,
+} from "./skills";
 import { COMMON_SCOPE } from "./workspace";
 
 // ---- 読み取り --------------------------------------------------------------
 //
 // ビューは 2 種類:
-//   boardId = 文字列 … そのボード + 共通のマージ(ボード画面用)
-//   boardId = null   … 共通のみ(共通知識の管理画面用)
+//   boardId = 文字列 … そのボードの資料 + AI から見える知識(業務固有 + 全共通)
+//   boardId = null   … 共通管理画面(_common の資料 + 全スコープの共通知識)
 
-/** ビューに応じてスコープを読み、ソースへ scope を付けて返す */
-async function readAll(boardId: string | null): Promise<{
-  sources: SourceMeta[];
+/** ビューを所有スコープへ解決する */
+const ownerScope = (boardId: string | null): string => boardId ?? COMMON_SCOPE;
+
+/**
+ * ビューから見える知識を集める:
+ *   - labelOf: 有効なソース id → 出典表示名(他スコープ由来の共通知識には「(共通)」を付す)
+ *   - entries: 自スコープの全エントリ + 他スコープの共通エントリ
+ */
+async function view(boardId: string | null): Promise<{
+  labelOf: Map<string, string>;
   entries: KnowledgeEntry[];
 }> {
-  const [commonSources, commonEntries] = await Promise.all([
-    readSources(COMMON_SCOPE),
-    readEntries(COMMON_SCOPE),
-  ]);
-  const common = {
-    sources: commonSources.map((s) => ({ ...s, scope: "common" as const })),
-    entries: commonEntries,
-  };
-  if (boardId === null) return common;
+  const own = ownerScope(boardId);
+  const scopes = [COMMON_SCOPE, ...(await listBoards()).map((b) => b.id)];
+  const labelOf = new Map<string, string>();
+  const entries: KnowledgeEntry[] = [];
 
-  const [boardSources, boardEntries] = await Promise.all([
-    readSources(boardId),
-    readEntries(boardId),
-  ]);
-  return {
-    sources: [
-      ...boardSources.map((s) => ({ ...s, scope: "board" as const })),
-      ...common.sources,
-    ],
-    entries: [...boardEntries, ...common.entries],
-  };
+  for (const scope of new Set([own, ...scopes])) {
+    const foreign = scope !== own;
+    const scoped = await readEntries(scope);
+    entries.push(...(foreign ? scoped.filter((e) => e.common) : scoped));
+    for (const s of await readSources(scope)) {
+      if (!s.enabled) continue;
+      labelOf.set(
+        s.id,
+        foreign && boardId !== null ? `${s.fileName}(共通)` : s.fileName,
+      );
+    }
+  }
+  return { labelOf, entries };
 }
 
-/** ソース id がどちらのスコープにあるかを解決する */
-async function scopeOf(boardId: string | null, sourceId: string): Promise<string> {
-  if (
-    boardId !== null &&
-    (await readSources(boardId)).some((s) => s.id === sourceId)
-  ) {
-    return boardId;
-  }
-  if ((await readSources(COMMON_SCOPE)).some((s) => s.id === sourceId)) {
-    return COMMON_SCOPE;
-  }
-  throw new Error("指定の資料が見つかりません");
-}
-
-/** 知識ベースの全体像(ソース一覧、カテゴリ別エントリ数)。null = 共通のみ */
+/** 知識ベースの全体像(このビューの資料一覧、AI から見えるカテゴリ別エントリ数) */
 export async function getKnowledgeState(
   boardId: string | null,
 ): Promise<KnowledgeState> {
-  const { sources, entries } = await readAll(boardId);
-  return { sources, categories: summarize(sources, entries) };
+  const [sources, { labelOf, entries }] = await Promise.all([
+    readSources(ownerScope(boardId)),
+    view(boardId),
+  ]);
+  return { sources, categories: summarize(labelOf, entries) };
 }
 
 // ---- 取り込み・再抽出 -------------------------------------------------------
@@ -107,17 +109,14 @@ async function toMarkdown(fileName: string, buffer: Buffer): Promise<string> {
 
 /**
  * ファイル 1 つをソースとして取り込む:
- * 原資料の保存 → Markdown 化 → LLM でドメイン知識を抽出 → カテゴリ skill を再レンダリング。
- * common = true なら業務横断の共通知識として登録する。
+ * 原資料の保存 → Markdown 化 → LLM でドメイン知識を抽出 → skill を再レンダリング。
+ * 各エントリの業務固有/業務横断は AI が判定する(共通管理画面からの追加は常に共通)。
  */
 export async function addSource(
   boardId: string | null,
   fileName: string,
   buffer: Buffer,
-  common = false,
 ): Promise<KnowledgeState> {
-  // 共通ビュー(null)からの追加は必ず共通知識になる
-  if (boardId === null) common = true;
   if (!isSupportedFile(fileName)) {
     throw new Error(
       `未対応のファイル形式です: ${fileName}(xlsx / xls / csv / pdf / md / txt に対応)`,
@@ -133,8 +132,7 @@ export async function addSource(
     );
   }
 
-  // null は上で common=true に倒しているため、ここでの boardId は文字列
-  const scope: string = common ? COMMON_SCOPE : (boardId as string);
+  const scope = ownerScope(boardId);
   const id = newId();
   await saveOriginal(scope, id, fileName, buffer);
 
@@ -143,17 +141,17 @@ export async function addSource(
   sources.push({
     id,
     fileName,
-    scope: common ? "common" : "board",
     enabled: true,
     entryCount: extracted.length,
     uploadedAt: new Date().toISOString(),
   });
   for (const e of extracted) {
-    entries.push({ id: newId(), sourceId: id, ...e });
+    // 共通管理画面からの追加は業務が無いため必ず共通知識になる
+    entries.push({ id: newId(), sourceId: id, ...e, common: boardId === null ? true : e.common });
   }
   await writeJson(sourcesFile(scope), sources);
   await writeJson(knowledgeFile(scope), entries);
-  await renderSkills(scope);
+  await rerender(scope);
   return getKnowledgeState(boardId);
 }
 
@@ -165,7 +163,7 @@ export async function reextractSource(
   boardId: string | null,
   sourceId: string,
 ): Promise<KnowledgeState> {
-  const scope = await scopeOf(boardId, sourceId);
+  const scope = ownerScope(boardId);
   const sources = await readSources(scope);
   const meta = sources.find((s) => s.id === sourceId);
   if (!meta) throw new Error("指定の資料が見つかりません");
@@ -183,12 +181,12 @@ export async function reextractSource(
     (e) => e.sourceId !== sourceId,
   );
   for (const e of extracted) {
-    entries.push({ id: newId(), sourceId, ...e });
+    entries.push({ id: newId(), sourceId, ...e, common: boardId === null ? true : e.common });
   }
   meta.entryCount = extracted.length;
   await writeJson(sourcesFile(scope), sources);
   await writeJson(knowledgeFile(scope), entries);
-  await renderSkills(scope);
+  await rerender(scope);
   return getKnowledgeState(boardId);
 }
 
@@ -199,13 +197,13 @@ export async function setSourceEnabled(
   sourceId: string,
   enabled: boolean,
 ): Promise<KnowledgeState> {
-  const scope = await scopeOf(boardId, sourceId);
+  const scope = ownerScope(boardId);
   const sources = await readSources(scope);
   const source = sources.find((s) => s.id === sourceId);
   if (!source) throw new Error("指定の資料が見つかりません");
   source.enabled = enabled;
   await writeJson(sourcesFile(scope), sources);
-  await renderSkills(scope);
+  await rerender(scope);
   return getKnowledgeState(boardId);
 }
 
@@ -213,70 +211,32 @@ export async function deleteSource(
   boardId: string | null,
   sourceId: string,
 ): Promise<KnowledgeState> {
-  const scope = await scopeOf(boardId, sourceId);
-  const sources = (await readSources(scope)).filter((s) => s.id !== sourceId);
+  const scope = ownerScope(boardId);
+  const sources = await readSources(scope);
+  if (!sources.some((s) => s.id === sourceId)) {
+    throw new Error("指定の資料が見つかりません");
+  }
   const entries = (await readEntries(scope)).filter(
     (e) => e.sourceId !== sourceId,
   );
   await removeSourceDir(scope, sourceId);
-  await writeJson(sourcesFile(scope), sources);
+  await writeJson(sourcesFile(scope), sources.filter((s) => s.id !== sourceId));
   await writeJson(knowledgeFile(scope), entries);
-  await renderSkills(scope);
-  return getKnowledgeState(boardId);
-}
-
-/**
- * 資料を業務 ⇄ 共通の間で移動する(振り分けミスの修正用)。
- * メタ・エントリ・原資料をまとめて移し、両スコープの skill を再レンダリングする。
- * toCommon=false のときは boardId(現在のボード)へ移す。
- */
-export async function moveSource(
-  boardId: string,
-  sourceId: string,
-  toCommon: boolean,
-): Promise<KnowledgeState> {
-  const from = await scopeOf(boardId, sourceId);
-  const to = toCommon ? COMMON_SCOPE : boardId;
-  if (from === to) return getKnowledgeState(boardId);
-
-  const fromSources = await readSources(from);
-  const meta = fromSources.find((s) => s.id === sourceId);
-  if (!meta) throw new Error("指定の資料が見つかりません");
-  const fromEntries = await readEntries(from);
-  const own = fromEntries.filter((e) => e.sourceId === sourceId);
-
-  // 先に原資料を移す(ここで失敗すれば JSON は無傷 = 中途半端な状態を作らない)
-  await moveSourceDir(from, to, sourceId);
-
-  // 移動先へ追加 → 移動元から除去
-  const toSources = await readSources(to);
-  const toEntries = await readEntries(to);
-  toSources.push({ ...meta, scope: toCommon ? "common" : "board" });
-  toEntries.push(...own);
-  await writeJson(sourcesFile(to), toSources);
-  await writeJson(knowledgeFile(to), toEntries);
-  await writeJson(sourcesFile(from), fromSources.filter((s) => s.id !== sourceId));
-  await writeJson(
-    knowledgeFile(from),
-    fromEntries.filter((e) => e.sourceId !== sourceId),
-  );
-
-  await renderSkills(from);
-  await renderSkills(to);
+  await rerender(scope);
   return getKnowledgeState(boardId);
 }
 
 // ---- 閲覧(出典確認・カテゴリビュー) ---------------------------------------
 
-/** カテゴリの知識(ボード + 共通、有効ソース由来)を閲覧用 Markdown で返す */
+/** カテゴリの知識(このビューから見える有効ソース由来)を閲覧用 Markdown で返す */
 export async function getCategoryMarkdown(
   boardId: string | null,
   category: KnowledgeCategory,
 ): Promise<{ label: string; markdown: string }> {
   const def = CATEGORIES.find((c) => c.category === category);
   if (!def) throw new Error("指定のカテゴリが見つかりません");
-  const { sources, entries } = await readAll(boardId);
-  const body = renderCategoryBody(category, sources, entries);
+  const { labelOf, entries } = await view(boardId);
+  const body = renderCategoryBody(category, labelOf, entries);
   return {
     label: def.label,
     markdown: body || "(このカテゴリの知識はまだありません)",
@@ -288,14 +248,19 @@ export async function getSourceMarkdown(
   boardId: string | null,
   sourceId: string,
 ): Promise<{ meta: SourceMeta; markdown: string }> {
-  const { sources, entries } = await readAll(boardId);
-  const meta = sources.find((s) => s.id === sourceId);
+  const scope = ownerScope(boardId);
+  const meta = (await readSources(scope)).find((s) => s.id === sourceId);
   if (!meta) throw new Error("指定の資料が見つかりません");
-  const own = entries.filter((e) => e.sourceId === sourceId);
+  const own = (await readEntries(scope)).filter((e) => e.sourceId === sourceId);
   const markdown = CATEGORIES.map((c) => {
     const list = own.filter((e) => e.category === c.category);
     if (list.length === 0) return null;
-    return `# ${c.label}\n\n${list.map((e) => `## ${e.title}\n\n${e.content}`).join("\n\n")}`;
+    return `# ${c.label}\n\n${list
+      .map(
+        (e) =>
+          `## ${e.title}${e.common ? "(業務横断の共通知識)" : ""}\n\n${e.content}`,
+      )
+      .join("\n\n")}`;
   })
     .filter((s): s is string => s !== null)
     .join("\n\n");
@@ -304,20 +269,25 @@ export async function getSourceMarkdown(
 
 // ---- 内部 ----------------------------------------------------------------
 
+/** スコープの変更を skill へ反映する(共通知識は全スコープの合成なので常に作り直す) */
+async function rerender(scope: string): Promise<void> {
+  if (scope !== COMMON_SCOPE) await renderSkills(scope);
+  await renderCommonSkills();
+}
+
 function newId(): string {
   return `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
 function summarize(
-  sources: SourceMeta[],
+  labelOf: Map<string, string>,
   entries: KnowledgeEntry[],
 ): KnowledgeCategorySummary[] {
-  const enabledIds = new Set(sources.filter((s) => s.enabled).map((s) => s.id));
   return CATEGORIES.map((c) => ({
     category: c.category,
     label: c.label,
     count: entries.filter(
-      (e) => e.category === c.category && enabledIds.has(e.sourceId),
+      (e) => e.category === c.category && labelOf.has(e.sourceId),
     ).length,
   }));
 }

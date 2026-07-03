@@ -4,7 +4,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import type { KnowledgeEntry, SourceMeta } from "@/contracts";
-import { workspaceDir } from "./workspace";
+import { COMMON_SCOPE, workspaceDir } from "./workspace";
 
 export const sourcesFile = (scope: string) =>
   path.join(workspaceDir(scope), "sources.json");
@@ -30,8 +30,17 @@ export async function writeJson(file: string, data: unknown): Promise<void> {
 
 export const readSources = (scope: string) =>
   readJson<SourceMeta[]>(sourcesFile(scope), []);
-export const readEntries = (scope: string) =>
-  readJson<KnowledgeEntry[]>(knowledgeFile(scope), []);
+
+/**
+ * エントリの読み取り。common フラグが無い旧データは
+ * 「共通スコープ由来なら共通、それ以外は業務固有」として補完する。
+ */
+export const readEntries = async (scope: string): Promise<KnowledgeEntry[]> => {
+  const entries = await readJson<KnowledgeEntry[]>(knowledgeFile(scope), []);
+  return entries.map((e) =>
+    typeof e.common === "boolean" ? e : { ...e, common: scope === COMMON_SCOPE },
+  );
+};
 
 /** 原資料の保存(再抽出・出典確認用) */
 export async function saveOriginal(
@@ -54,23 +63,4 @@ export async function readOriginal(
 
 export async function removeSourceDir(scope: string, id: string): Promise<void> {
   await fs.rm(sourceDir(scope, id), { recursive: true, force: true });
-}
-
-/**
- * 原資料ディレクトリをスコープ間で移動する(業務 ⇄ 共通の付け替え用)。
- * 原資料が無い場合(旧形式のデータなど)はスキップする。
- */
-export async function moveSourceDir(
-  fromScope: string,
-  toScope: string,
-  id: string,
-): Promise<void> {
-  const dest = sourceDir(toScope, id);
-  await fs.mkdir(path.dirname(dest), { recursive: true });
-  try {
-    await fs.rename(sourceDir(fromScope, id), dest);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
-    throw err;
-  }
 }

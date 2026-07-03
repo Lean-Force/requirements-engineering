@@ -305,10 +305,9 @@ export default function BoardPage({ params }: Props) {
 
   // ドメイン知識(コンテキスト)の操作
   const uploadContexts = useCallback(
-    async (files: FileList, common: boolean): Promise<string | null> => {
+    async (files: FileList): Promise<string | null> => {
       const form = new FormData();
       for (const file of Array.from(files)) form.append("files", file);
-      if (common) form.append("common", "1");
       try {
         const res = await fetch(`${api}/contexts`, { method: "POST", body: form });
         const data = await res.json();
@@ -353,25 +352,6 @@ export default function BoardPage({ params }: Props) {
         return null;
       } catch (e) {
         return e instanceof Error ? e.message : "再抽出に失敗しました";
-      }
-    },
-    [api],
-  );
-
-  const moveContext = useCallback(
-    async (id: string, toCommon: boolean): Promise<string | null> => {
-      try {
-        const res = await fetch(`${api}/contexts/${id}/move`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ common: toCommon }),
-        });
-        const data = await res.json();
-        if (!res.ok) return (data.error as string) ?? "移動に失敗しました";
-        setKnowledge(data as KnowledgeState);
-        return null;
-      } catch (e) {
-        return e instanceof Error ? e.message : "移動に失敗しました";
       }
     },
     [api],
@@ -485,7 +465,6 @@ export default function BoardPage({ params }: Props) {
             onToggle={toggleContext}
             onDelete={deleteContextDoc}
             onReextract={reextractContext}
-            onMove={moveContext}
             loadCategory={loadCategoryMarkdown}
             loadSource={loadSourceMarkdown}
             onClose={() => setShowContexts(false)}

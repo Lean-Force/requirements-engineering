@@ -13,18 +13,25 @@ vi.mock("@/infrastructure/agent", () => ({
   extractKnowledge: (...args: unknown[]) => extractMock(...args),
 }));
 
+import { createBoard } from "@/infrastructure/boards";
 import {
   addSource,
+  prepareSkillsForChat,
+  reextractSource,
   setSourceEnabled,
 } from "@/infrastructure/context";
-import { prepareSkillsForChat } from "@/infrastructure/context";
 
 let tmp: string;
+let A: string; // 業務Aのボード id
+let B: string; // 業務Bのボード id
 
 beforeEach(async () => {
   tmp = await fs.mkdtemp(path.join(os.tmpdir(), "usm-pres-"));
   process.env.DATA_DIR = tmp;
   extractMock.mockReset();
+  // 共通知識は「登録済みボード + _common」から合成されるため、ボードとして登録する
+  A = (await createBoard("業務A")).id;
+  B = (await createBoard("業務B")).id;
 });
 
 afterEach(async () => {
@@ -44,18 +51,18 @@ const descriptionOf = (skillMd: string) =>
 describe("AI への提示内容(レベル2)", () => {
   it("業務Aの知識は業務Bのチャット準備に一切現れない(分離)", async () => {
     extractMock.mockResolvedValue([
-      { category: "flows", title: "送金の承認ルール", content: "1,000万円超は部長承認" },
+      { category: "flows", title: "送金の承認ルール", content: "1,000万円超は部長承認", common: false },
     ]);
-    await addSource("board-a", "送金.txt", Buffer.from("x"));
+    await addSource(A, "送金.txt", Buffer.from("x"));
     extractMock.mockResolvedValue([
-      { category: "flows", title: "口座開設の審査", content: "反社チェック必須" },
+      { category: "flows", title: "口座開設の審査", content: "反社チェック必須", common: false },
     ]);
-    await addSource("board-b", "口座.txt", Buffer.from("x"));
+    await addSource(B, "口座.txt", Buffer.from("x"));
 
     // skill 名は同じでも、ワークスペースが別なので中身が混ざらない
-    expect(await prepareSkillsForChat("board-a")).toEqual(["kb-flows"]);
-    const a = await readSkill("board-a", "kb-flows");
-    const b = await readSkill("board-b", "kb-flows");
+    expect(await prepareSkillsForChat(A)).toEqual(["kb-flows"]);
+    const a = await readSkill(A, "kb-flows");
+    const b = await readSkill(B, "kb-flows");
     expect(a).toContain("送金の承認ルール");
     expect(a).not.toContain("口座開設");
     expect(b).toContain("口座開設の審査");
@@ -64,16 +71,16 @@ describe("AI への提示内容(レベル2)", () => {
 
   it("2ソース中1つを off にすると、そのエントリだけが SKILL.md から消える", async () => {
     extractMock.mockResolvedValue([
-      { category: "flows", title: "ルールA", content: "内容A" },
+      { category: "flows", title: "ルールA", content: "内容A", common: false },
     ]);
-    const s1 = await addSource("board-a", "a.txt", Buffer.from("x"));
+    const s1 = await addSource(A, "a.txt", Buffer.from("x"));
     extractMock.mockResolvedValue([
-      { category: "flows", title: "ルールB", content: "内容B" },
+      { category: "flows", title: "ルールB", content: "内容B", common: false },
     ]);
-    await addSource("board-a", "b.txt", Buffer.from("x"));
+    await addSource(A, "b.txt", Buffer.from("x"));
 
-    await setSourceEnabled("board-a", s1.sources[0].id, false);
-    const skill = await readSkill("board-a", "kb-flows");
+    await setSourceEnabled(A, s1.sources[0].id, false);
+    const skill = await readSkill(A, "kb-flows");
     expect(skill).not.toContain("ルールA");
     expect(skill).toContain("ルールB");
     // description のタイトル一覧からも消える(トリガー材料の整合)
@@ -86,11 +93,12 @@ describe("AI への提示内容(レベル2)", () => {
       category: "terms",
       title: `とても長い用語のタイトルその${i + 1}番目`,
       content: `定義${i}`,
+      common: false,
     }));
     extractMock.mockResolvedValue(many);
-    await addSource("board-a", "用語.txt", Buffer.from("x"));
+    await addSource(A, "用語.txt", Buffer.from("x"));
 
-    const desc = descriptionOf(await readSkill("board-a", "kb-terms"));
+    const desc = descriptionOf(await readSkill(A, "kb-terms"));
     expect(desc).toContain("とても長い用語のタイトルその1番目"); // タイトルが手がかりに入る
     expect(desc).toContain("読むこと"); // いつ読むかの指示
     expect(desc).toContain("ほか"); // 切り詰め表示
@@ -103,51 +111,48 @@ describe("AI への提示内容(レベル2)", () => {
         category: "data",
         title: "送金種別",
         content: "| 値 | 意味 |\n| --- | --- |\n| 01 | 即時 |\n| 02 | 予約 |\n値域: 1〜100,000,000",
+        common: false,
       },
     ]);
-    await addSource("board-a", "IF.txt", Buffer.from("x"));
-    const skill = await readSkill("board-a", "kb-data");
+    await addSource(A, "IF.txt", Buffer.from("x"));
+    const skill = await readSkill(A, "kb-data");
     expect(skill).toContain("| 01 | 即時 |");
     expect(skill).toContain("1〜100,000,000");
     expect(skill).toContain("_出典: IF.txt_");
   });
 
-  it("共通知識の更新は、次のチャット準備で各ボードへ同期される", async () => {
+  it("共通へ振り分けられた知識の更新は、次のチャット準備で各ボードへ同期される", async () => {
     extractMock.mockResolvedValue([
-      { category: "terms", title: "BSAD", content: "旧定義" },
+      { category: "terms", title: "BSAD", content: "旧定義", common: true },
     ]);
-    const state = await addSource("board-a", "用語集.txt", Buffer.from("x"), true);
+    const state = await addSource(A, "用語集.txt", Buffer.from("x"));
 
-    await prepareSkillsForChat("board-b");
-    expect(await readSkill("board-b", "kb-common-terms")).toContain("旧定義");
+    await prepareSkillsForChat(B);
+    expect(await readSkill(B, "kb-common-terms")).toContain("旧定義");
 
-    // 共通側を再抽出で更新 → 再同期で新しい内容に置き換わる
+    // 資料の持ち主(業務A)側で再抽出 → 再同期で新しい内容に置き換わる
     extractMock.mockResolvedValue([
-      { category: "terms", title: "BSAD", content: "新定義" },
+      { category: "terms", title: "BSAD", content: "新定義", common: true },
     ]);
-    const { reextractSource } = await import("@/infrastructure/context");
-    await reextractSource("board-b", state.sources[0].id);
-    await prepareSkillsForChat("board-b");
-    const synced = await readSkill("board-b", "kb-common-terms");
+    await reextractSource(A, state.sources[0].id);
+    await prepareSkillsForChat(B);
+    const synced = await readSkill(B, "kb-common-terms");
     expect(synced).toContain("新定義");
     expect(synced).not.toContain("旧定義");
   });
 
   it("業務と共通の skill は名前と説明の書き出しで区別できる", async () => {
     extractMock.mockResolvedValue([
-      { category: "terms", title: "業務用語", content: "x" },
+      { category: "terms", title: "業務用語", content: "x", common: false },
+      { category: "terms", title: "共通用語", content: "x", common: true },
     ]);
-    await addSource("board-a", "業務.txt", Buffer.from("x"));
-    extractMock.mockResolvedValue([
-      { category: "terms", title: "共通用語", content: "x" },
-    ]);
-    await addSource("board-a", "共通.txt", Buffer.from("x"), true);
-    await prepareSkillsForChat("board-a");
+    await addSource(A, "設計書.txt", Buffer.from("x"));
+    await prepareSkillsForChat(A);
 
-    expect(descriptionOf(await readSkill("board-a", "kb-terms"))).toContain(
+    expect(descriptionOf(await readSkill(A, "kb-terms"))).toContain(
       "この業務のドメイン知識",
     );
-    expect(descriptionOf(await readSkill("board-a", "kb-common-terms"))).toContain(
+    expect(descriptionOf(await readSkill(A, "kb-common-terms"))).toContain(
       "業務横断の共通知識",
     );
   });

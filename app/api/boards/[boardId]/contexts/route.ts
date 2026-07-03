@@ -17,7 +17,7 @@ export async function GET(_request: Request, { params }: Params) {
 }
 
 // ファイルのアップロード → ドメイン知識の抽出(multipart/form-data)。
-// common フィールドが "1" なら業務横断の共通知識として登録する。
+// 各エントリの業務固有/業務横断は AI が抽出時に自動判定する。
 export async function POST(request: Request, { params }: Params) {
   try {
     await getBoard(params.boardId);
@@ -42,16 +42,14 @@ export async function POST(request: Request, { params }: Params) {
   if (files.length === 0) {
     return NextResponse.json({ error: "ファイルがありません" }, { status: 400 });
   }
-  const common = form.get("common") === "1";
-
   try {
     let state = await getKnowledgeState(params.boardId);
     for (const file of files) {
       const buffer = Buffer.from(await file.arrayBuffer());
-      state = await addSource(params.boardId, file.name, buffer, common);
+      state = await addSource(params.boardId, file.name, buffer);
     }
-    // 共通知識は全ボードに影響するため "*" で通知する
-    emit(common ? "*" : params.boardId, "contexts");
+    // 共通知識へ振り分けられたエントリは全ボードに影響するため "*" で通知する
+    emit("*", "contexts");
     return NextResponse.json(state);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

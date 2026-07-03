@@ -15,13 +15,13 @@
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
-import { generate } from "../../infrastructure/agent";
+import { extractKnowledge, generate } from "../../infrastructure/agent";
 import {
   knowledgeFile,
   sourcesFile,
   writeJson,
 } from "../../infrastructure/context/repository";
-import { renderSkills, prepareSkillsForChat } from "../../infrastructure/context/skills";
+import { renderCommonSkills, renderSkills, prepareSkillsForChat } from "../../infrastructure/context/skills";
 import { COMMON_SCOPE } from "../../infrastructure/context/workspace";
 import type { KnowledgeCategory } from "../../contracts";
 
@@ -45,20 +45,22 @@ async function seed(
     {
       id: sourceId,
       fileName,
-      scope: scope === COMMON_SCOPE ? "common" : "board",
       enabled,
       entryCount: entries.length,
       uploadedAt: "2026-01-01T00:00:00.000Z",
     },
   ];
+  // スコープはエントリ単位: 共通スコープへのシードは common エントリになる
   const knowledge = entries.map((e, i) => ({
     id: `eval-ent-${seq}-${i}`,
     sourceId,
+    common: scope === COMMON_SCOPE,
     ...e,
   }));
   await writeJson(sourcesFile(scope), sources);
   await writeJson(knowledgeFile(scope), knowledge);
-  await renderSkills(scope);
+  if (scope === COMMON_SCOPE) await renderCommonSkills();
+  else await renderSkills(scope);
 }
 
 // ---- ケース定義 -------------------------------------------------------------
@@ -148,6 +150,38 @@ async function main() {
   ]);
 
   let failed = 0;
+
+  // ---- 抽出時のスコープ自動判定(業務固有 / 業務横断) -----------------------
+  {
+    const started = Date.now();
+    const extracted = await extractKnowledge(
+      "送金業務設計書.md",
+      [
+        "# 全社用語",
+        "- BSAD: 基本設計書の社内略称(全社共通)。",
+        "# 送金の承認ルール",
+        "- 1,000万円を超える送金は部長承認が必要。",
+      ].join("\n"),
+    );
+    const problems: string[] = [];
+    const find = (kw: string) => extracted.find((e) => (e.title + e.content).includes(kw));
+    const bsad = find("BSAD");
+    const rule = find("部長承認") ?? find("承認");
+    if (!bsad) problems.push("BSAD が抽出されていない");
+    else if (bsad.common !== true) problems.push("全社用語 BSAD が共通(common=true)に振り分けられていない");
+    if (!rule) problems.push("承認ルールが抽出されていない");
+    else if (rule.common !== false) problems.push("業務の承認ルールが業務固有(common=false)になっていない");
+    const secs = Math.round((Date.now() - started) / 1000);
+    if (problems.length === 0) {
+      console.log(`✅ PASS (${secs}s) 抽出時に業務固有/業務横断を自動判定する`);
+    } else {
+      failed++;
+      console.log(`❌ FAIL (${secs}s) 抽出時に業務固有/業務横断を自動判定する`);
+      for (const pr of problems) console.log(`   - ${pr}`);
+      console.log(`   extracted: ${JSON.stringify(extracted.map((e) => ({ t: e.title, common: e.common })))}`);
+    }
+  }
+
   for (const c of CASES) {
     const skills = await prepareSkillsForChat(c.boardId);
     const started = Date.now();
@@ -188,7 +222,7 @@ async function main() {
   }
 
   await fs.rm(tmp, { recursive: true, force: true });
-  console.log(`\n${CASES.length - failed}/${CASES.length} passed`);
+  console.log(`\n${CASES.length + 1 - failed}/${CASES.length + 1} passed`);
   process.exit(failed > 0 ? 1 : 0);
 }
 

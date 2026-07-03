@@ -82,7 +82,7 @@ export default function BoardSwitcher({ current, onCurrentRenamed }: Props) {
     async (board: BoardMeta) => {
       if (
         !window.confirm(
-          `ボード「${board.name}」を削除しますか?\nマップ・会話・版履歴・この業務のドメイン知識がすべて消えます(共通知識は残ります)。`,
+          `ボード「${board.name}」を削除しますか?\nマップ・会話・版履歴・この業務の資料と知識がすべて消えます(この業務の資料から共通へ振り分けられた知識も消えます)。`,
         )
       )
         return;

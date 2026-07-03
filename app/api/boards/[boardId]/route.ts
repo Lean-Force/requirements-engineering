@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { renameBoard, deleteBoard } from "@/infrastructure/boards";
+import { renderCommonSkills } from "@/infrastructure/context";
+import { emit } from "@/infrastructure/events";
 
 export const dynamic = "force-dynamic";
 
@@ -26,10 +28,13 @@ export async function PATCH(request: Request, { params }: Params) {
   }
 }
 
-// ボードの削除(マップ・会話・版履歴・ドメイン知識ごと。共通知識は残る)
+// ボードの削除(マップ・会話・版履歴・ドメイン知識ごと。
+// このボードの資料から共通へ振り分けられていた知識も消えるため、共通 skill を作り直す)
 export async function DELETE(_request: Request, { params }: Params) {
   try {
     await deleteBoard(params.boardId);
+    await renderCommonSkills();
+    emit("*", "contexts");
     return NextResponse.json({ ok: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

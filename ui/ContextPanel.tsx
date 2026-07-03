@@ -7,13 +7,11 @@ interface Props {
   knowledge: KnowledgeState;
   /** ボード名(アップロード先の表示に使う) */
   boardName: string;
-  onUpload: (files: FileList, common: boolean) => Promise<string | null>;
+  onUpload: (files: FileList) => Promise<string | null>;
   onToggle: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
   /** 保存済みの原ファイルから知識を再抽出する(エラー文字列を返すと表示) */
   onReextract: (id: string) => Promise<string | null>;
-  /** 資料を業務 ⇄ 共通の間で移動する(toCommon = true で共通へ) */
-  onMove: (id: string, toCommon: boolean) => Promise<string | null>;
   /** カテゴリ / ソースの閲覧用 Markdown を取得する(データ取得は親が担う) */
   loadCategory: (category: string) => Promise<string>;
   loadSource: (id: string) => Promise<string>;
@@ -32,15 +30,12 @@ export default function ContextPanel({
   onToggle,
   onDelete,
   onReextract,
-  onMove,
   loadCategory,
   loadSource,
   onClose,
 }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
-  // アップロード先: false = このボード(業務)の知識 / true = 業務横断の共通知識
-  const [asCommon, setAsCommon] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewer, setViewer] = useState<Viewer | null>(null);
   // 再抽出中のソース id
@@ -57,22 +52,11 @@ export default function ContextPanel({
     setReextracting(null);
   };
 
-  const move = async (s: SourceMeta) => {
-    const toCommon = s.scope === "board";
-    const confirmText = toCommon
-      ? `「${s.fileName}」を共通知識へ移動しますか?\n全ボードから参照されるようになります。`
-      : `「${s.fileName}」をこのボード(業務)の知識へ移動しますか?\n他のボードからは参照できなくなります。`;
-    if (!window.confirm(confirmText)) return;
-    setError(null);
-    const message = await onMove(s.id, toCommon);
-    if (message) setError(message);
-  };
-
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setUploading(true);
     setError(null);
-    const message = await onUpload(files, asCommon);
+    const message = await onUpload(files);
     if (message) setError(message);
     setUploading(false);
     if (fileInput.current) fileInput.current.value = "";
@@ -92,8 +76,6 @@ export default function ContextPanel({
   };
 
   const { sources, categories } = knowledge;
-  const boardSources = sources.filter((s) => s.scope === "board");
-  const commonSources = sources.filter((s) => s.scope === "common");
   const totalEntries = categories.reduce((n, c) => n + c.count, 0);
 
   const renderSource = (s: SourceMeta) => (
@@ -116,17 +98,6 @@ export default function ContextPanel({
           </button>
         </div>
         <div className="context-item-ops">
-          <button
-            className="context-move"
-            onClick={() => move(s)}
-            title={
-              s.scope === "board"
-                ? "共通知識へ移動(全ボードで参照される)"
-                : "この業務の知識へ移動(他ボードから見えなくなる)"
-            }
-          >
-            {s.scope === "board" ? "🌐" : "📥"}
-          </button>
           <button
             className="context-reextract"
             onClick={() => reextract(s.id)}
@@ -179,19 +150,10 @@ export default function ContextPanel({
           style={{ display: "none" }}
           onChange={(e) => handleFiles(e.target.files)}
         />
-        <label className="context-common-toggle">
-          <input
-            type="checkbox"
-            checked={asCommon}
-            onChange={(e) => setAsCommon(e.target.checked)}
-          />
-          業務横断の共通知識として登録(全ボードで参照される)
-        </label>
         <div className="context-hint">
-          {asCommon
-            ? "全社用語集・組織図など、どの業務にも共通する資料向け。"
-            : `「${boardName}」の知識として登録します。`}
-          追加した資料から AI がドメイン知識を抽出し、チーム全員で共有します。
+          「{boardName}」の資料として登録します。AI がドメイン知識を抽出し、
+          全社用語・組織・共通規程などの業務横断の知識は自動で共通知識になり、
+          全ボードから参照されます。
         </div>
         {error && <div className="context-error">⚠️ {error}</div>}
       </div>
@@ -210,21 +172,14 @@ export default function ContextPanel({
           </button>
         ))}
 
-        <div className="context-section-title">このボードの資料</div>
-        {boardSources.length === 0 && (
+        <div className="context-section-title">この業務の資料</div>
+        {sources.length === 0 && (
           <div className="context-empty">
             まだ資料がありません。要件一覧・業務フロー・議事録などを追加すると、
             AI がドメイン知識に分解して蓄積します。
           </div>
         )}
-        {boardSources.map(renderSource)}
-
-        {commonSources.length > 0 && (
-          <>
-            <div className="context-section-title">共通の資料(業務横断)</div>
-            {commonSources.map(renderSource)}
-          </>
-        )}
+        {sources.map(renderSource)}
       </div>
 
       {viewer && (

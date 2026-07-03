@@ -1,8 +1,8 @@
 "use client";
 
 // 共通知識(業務横断)の管理ページ。ボードを開かずに GLOBAL を整備する場所。
-// 資料の追加・on/off・再抽出・削除と、カテゴリ/出典の閲覧ができる。
-// 業務への振り分け直し(移動)は各ボードのパネル側から行う。
+// ここで追加した資料の知識はすべて共通になる。カテゴリには、各ボードの資料から
+// AI が共通へ振り分けた知識も合わせて表示される(それらの資料の管理は各ボード側)。
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -135,7 +135,8 @@ export default function KnowledgeAdminPage() {
       <header className="board-list-header">
         <h1>共通知識(業務横断)</h1>
         <span className="sub">
-          全社用語集・組織・共通規程など、すべてのボード(業務)から参照される知識を管理します —{" "}
+          すべてのボード(業務)から参照される知識です。各ボードの資料から AI が
+          自動で振り分けた知識もここに集まります —{" "}
           <Link href="/">ボードへ戻る</Link>
         </span>
       </header>
@@ -175,11 +176,11 @@ export default function KnowledgeAdminPage() {
           </button>
         ))}
 
-        <div className="context-section-title">共通の資料</div>
+        <div className="context-section-title">ここで追加した資料</div>
         {ready && sources.length === 0 && (
           <div className="context-empty">
-            まだ共通知識がありません。全社用語集・組織図・共通規程などを追加すると、
-            すべてのボードの AI から参照されます。
+            ここで追加した資料はまだありません。全社用語集・組織図・共通規程などを
+            追加すると、すべてのボードの AI から参照されます。
           </div>
         )}
         {sources.map((s) => (

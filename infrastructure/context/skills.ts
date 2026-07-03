@@ -1,16 +1,19 @@
 // ドメイン知識の「AI 向けビュー」= Agent Skill(SKILL.md)のレンダリング。
 //
 // カテゴリごとに 1 skill を生成し、description にエントリのタイトル一覧を入れる
-// (AI が読む/読まないを決める唯一の手がかり)。共通知識(_common)は
-// kb-common-* という名前でレンダリングされ、チャット直前に各ボードへ同期される。
+// (AI が読む/読まないを決める唯一の手がかり)。
+//
+// スコープはエントリ単位(KnowledgeEntry.common)。資料はアップロードした場所
+// (ボード or 共通管理画面)に属し、抽出された各エントリを AI が
+// 業務固有 / 業務横断に自動判定する:
+//   kb-<cat>        … ボードの業務固有エントリ(common = false)
+//   kb-common-<cat> … 全スコープの共通エントリ(common = true)を _common に合成
+// kb-common-* はチャット直前に各ボードのワークスペースへ同期コピーされる。
 
 import { promises as fs } from "fs";
 import path from "path";
-import type {
-  KnowledgeCategory,
-  KnowledgeEntry,
-  SourceMeta,
-} from "@/contracts";
+import type { KnowledgeCategory, KnowledgeEntry } from "@/contracts";
+import { listBoards } from "../boards";
 import { readEntries, readSources, skillsRoot } from "./repository";
 import { COMMON_SCOPE } from "./workspace";
 
@@ -31,44 +34,67 @@ export function skillName(category: KnowledgeCategory, scope: string): string {
   return scope === COMMON_SCOPE ? `kb-common-${category}` : `kb-${category}`;
 }
 
-/** カテゴリ本文(有効ソース由来のエントリを出典付きで並べる)。閲覧 UI と SKILL.md の共通描画 */
+/**
+ * カテゴリ本文(有効ソース由来のエントリを出典付きで並べる)。
+ * labelOf は「有効なソース id → 出典表示名」。閲覧 UI と SKILL.md の共通描画。
+ */
 export function renderCategoryBody(
   category: KnowledgeCategory,
-  sources: SourceMeta[],
+  labelOf: Map<string, string>,
   entries: KnowledgeEntry[],
 ): string {
-  const enabled = new Map(
-    sources
-      .filter((s) => s.enabled)
-      .map((s) => [
-        s.id,
-        s.scope === "common" ? `${s.fileName}(共通)` : s.fileName,
-      ]),
-  );
   const list = entries.filter(
-    (e) => e.category === category && enabled.has(e.sourceId),
+    (e) => e.category === category && labelOf.has(e.sourceId),
   );
   return list
     .map(
       (e) =>
-        `## ${e.title}\n\n${e.content}\n\n_出典: ${enabled.get(e.sourceId)}_`,
+        `## ${e.title}\n\n${e.content}\n\n_出典: ${labelOf.get(e.sourceId)}_`,
     )
     .join("\n\n");
 }
 
-/** スコープのカテゴリ別 SKILL.md を再レンダリングする */
-export async function renderSkills(scope: string): Promise<void> {
-  const sources = (await readSources(scope)).map((s) => ({
-    ...s,
-    scope: (scope === COMMON_SCOPE ? "common" : "board") as SourceMeta["scope"],
-  }));
-  const entries = await readEntries(scope);
-  const enabledIds = new Set(sources.filter((s) => s.enabled).map((s) => s.id));
-  const isCommon = scope === COMMON_SCOPE;
+/** スコープの有効ソースの表示名マップ(ソース id → ファイル名)を作る */
+async function enabledLabels(scope: string): Promise<Map<string, string>> {
+  const sources = await readSources(scope);
+  return new Map(sources.filter((s) => s.enabled).map((s) => [s.id, s.fileName]));
+}
 
+/**
+ * ボードの業務固有知識(common = false)のカテゴリ別 SKILL.md を再レンダリングする。
+ * 共通知識側(kb-common-*)は renderCommonSkills が担う。
+ */
+export async function renderSkills(boardId: string): Promise<void> {
+  const labelOf = await enabledLabels(boardId);
+  const entries = (await readEntries(boardId)).filter((e) => !e.common);
+  await renderCategorySkills(boardId, labelOf, entries, false);
+}
+
+/**
+ * 業務横断の共通知識(全スコープの common = true エントリ)を _common の
+ * kb-common-* へ合成する。どのボードの知識が変わっても呼び直す。
+ */
+export async function renderCommonSkills(): Promise<void> {
+  const scopes = [COMMON_SCOPE, ...(await listBoards()).map((b) => b.id)];
+  const labelOf = new Map<string, string>();
+  const entries: KnowledgeEntry[] = [];
+  for (const scope of scopes) {
+    for (const [id, label] of await enabledLabels(scope)) labelOf.set(id, label);
+    entries.push(...(await readEntries(scope)).filter((e) => e.common));
+  }
+  await renderCategorySkills(COMMON_SCOPE, labelOf, entries, true);
+}
+
+/** カテゴリごとに SKILL.md を書き出す(空カテゴリの skill は残さない) */
+async function renderCategorySkills(
+  scope: string,
+  labelOf: Map<string, string>,
+  entries: KnowledgeEntry[],
+  isCommon: boolean,
+): Promise<void> {
   for (const c of CATEGORIES) {
     const list = entries.filter(
-      (e) => e.category === c.category && enabledIds.has(e.sourceId),
+      (e) => e.category === c.category && labelOf.has(e.sourceId),
     );
     const name = skillName(c.category, scope);
     const dir = path.join(skillsRoot(scope), name);
@@ -85,7 +111,7 @@ export async function renderSkills(scope: string): Promise<void> {
     const prefix = isCommon ? "業務横断の共通知識" : "この業務のドメイン知識";
     const description = `${prefix}: ${c.label}(${titles})。${c.whenToRead}に読むこと。`;
 
-    const body = renderCategoryBody(c.category, sources, entries);
+    const body = renderCategoryBody(c.category, labelOf, list);
     const skillMd = `---
 name: ${name}
 description: ${oneLine(description)}
@@ -107,16 +133,13 @@ ${body}
 export async function prepareSkillsForChat(boardId: string): Promise<string[]> {
   const names: string[] = [];
 
-  // ボード自身の知識
-  const boardSources = await readSources(boardId);
-  const boardEntries = await readEntries(boardId);
-  const boardEnabled = new Set(
-    boardSources.filter((s) => s.enabled).map((s) => s.id),
-  );
+  // ボード自身の業務固有知識
+  const labelOf = await enabledLabels(boardId);
+  const boardEntries = (await readEntries(boardId)).filter((e) => !e.common);
   for (const c of CATEGORIES) {
     if (
       boardEntries.some(
-        (e) => e.category === c.category && boardEnabled.has(e.sourceId),
+        (e) => e.category === c.category && labelOf.has(e.sourceId),
       )
     ) {
       names.push(skillName(c.category, boardId));

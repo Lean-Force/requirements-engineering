@@ -57,12 +57,10 @@ export type KnowledgeCategory =
   | "data" // データ・IF定義
   | "background"; // 背景・課題
 
-/** 取り込まれた原資料(ソース)のメタ情報 */
+/** 取り込まれた原資料(ソース)のメタ情報。アップロードした場所(ボード or 共通管理画面)に属する */
 export interface SourceMeta {
   id: string;
   fileName: string;
-  /** board = このボード(業務)の知識 / common = 業務横断の共通知識 */
-  scope: "board" | "common";
   /** このソース由来の知識を AI に提示するか(チーム共有の状態) */
   enabled: boolean;
   /** 抽出されたエントリ数 */
@@ -80,6 +78,8 @@ export interface KnowledgeEntry {
   content: string;
   /** 出典ソース */
   sourceId: string;
+  /** true = 業務横断の共通知識(AI が抽出時に自動判定し、全ボードから参照される) */
+  common: boolean;
 }
 
 /** カテゴリの一覧表示用サマリ */

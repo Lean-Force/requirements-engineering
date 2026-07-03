@@ -177,6 +177,8 @@ export interface ExtractedEntry {
   category: KnowledgeCategory;
   title: string;
   content: string;
+  /** true = 業務横断の共通知識(抽出時に AI が判定) */
+  common: boolean;
 }
 
 /** 資料(Markdown 化済み)からドメイン知識エントリを抽出する(ツールなし 1 ターン) */
