@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { BoardMeta } from "@/contracts";
 
@@ -262,6 +263,13 @@ export default function BoardSwitcher({ current, onCurrentRenamed }: Props) {
               onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
             />
             {error && <div className="board-switcher-error">⚠️ {error}</div>}
+            <Link
+              href="/knowledge"
+              className="board-switcher-knowledge"
+              onClick={() => setOpen(false)}
+            >
+              🌐 共通知識を管理(業務横断)
+            </Link>
           </div>
         </>
       )}

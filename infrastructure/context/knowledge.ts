@@ -23,6 +23,7 @@ import type {
 import { extractKnowledge } from "../agent";
 import { isSupportedFile, parseFile } from "./parse";
 import {
+  moveSourceDir,
   readEntries,
   readOriginal,
   readSources,
@@ -35,40 +36,58 @@ import {
 import { CATEGORIES, renderCategoryBody, renderSkills } from "./skills";
 import { COMMON_SCOPE } from "./workspace";
 
-// ---- 読み取り(ボード + 共通のマージ) --------------------------------------
+// ---- 読み取り --------------------------------------------------------------
+//
+// ビューは 2 種類:
+//   boardId = 文字列 … そのボード + 共通のマージ(ボード画面用)
+//   boardId = null   … 共通のみ(共通知識の管理画面用)
 
-/** ボード + 共通の両スコープを読み、ソースへ scope を付けて返す */
-async function readAll(boardId: string): Promise<{
+/** ビューに応じてスコープを読み、ソースへ scope を付けて返す */
+async function readAll(boardId: string | null): Promise<{
   sources: SourceMeta[];
   entries: KnowledgeEntry[];
 }> {
-  const [boardSources, boardEntries, commonSources, commonEntries] =
-    await Promise.all([
-      readSources(boardId),
-      readEntries(boardId),
-      readSources(COMMON_SCOPE),
-      readEntries(COMMON_SCOPE),
-    ]);
+  const [commonSources, commonEntries] = await Promise.all([
+    readSources(COMMON_SCOPE),
+    readEntries(COMMON_SCOPE),
+  ]);
+  const common = {
+    sources: commonSources.map((s) => ({ ...s, scope: "common" as const })),
+    entries: commonEntries,
+  };
+  if (boardId === null) return common;
+
+  const [boardSources, boardEntries] = await Promise.all([
+    readSources(boardId),
+    readEntries(boardId),
+  ]);
   return {
     sources: [
       ...boardSources.map((s) => ({ ...s, scope: "board" as const })),
-      ...commonSources.map((s) => ({ ...s, scope: "common" as const })),
+      ...common.sources,
     ],
-    entries: [...boardEntries, ...commonEntries],
+    entries: [...boardEntries, ...common.entries],
   };
 }
 
 /** ソース id がどちらのスコープにあるかを解決する */
-async function scopeOf(boardId: string, sourceId: string): Promise<string> {
-  if ((await readSources(boardId)).some((s) => s.id === sourceId)) return boardId;
+async function scopeOf(boardId: string | null, sourceId: string): Promise<string> {
+  if (
+    boardId !== null &&
+    (await readSources(boardId)).some((s) => s.id === sourceId)
+  ) {
+    return boardId;
+  }
   if ((await readSources(COMMON_SCOPE)).some((s) => s.id === sourceId)) {
     return COMMON_SCOPE;
   }
   throw new Error("指定の資料が見つかりません");
 }
 
-/** 知識ベースの全体像(ボード + 共通のソース一覧、カテゴリ別エントリ数) */
-export async function getKnowledgeState(boardId: string): Promise<KnowledgeState> {
+/** 知識ベースの全体像(ソース一覧、カテゴリ別エントリ数)。null = 共通のみ */
+export async function getKnowledgeState(
+  boardId: string | null,
+): Promise<KnowledgeState> {
   const { sources, entries } = await readAll(boardId);
   return { sources, categories: summarize(sources, entries) };
 }
@@ -92,11 +111,13 @@ async function toMarkdown(fileName: string, buffer: Buffer): Promise<string> {
  * common = true なら業務横断の共通知識として登録する。
  */
 export async function addSource(
-  boardId: string,
+  boardId: string | null,
   fileName: string,
   buffer: Buffer,
   common = false,
 ): Promise<KnowledgeState> {
+  // 共通ビュー(null)からの追加は必ず共通知識になる
+  if (boardId === null) common = true;
   if (!isSupportedFile(fileName)) {
     throw new Error(
       `未対応のファイル形式です: ${fileName}(xlsx / xls / csv / pdf / md / txt に対応)`,
@@ -112,7 +133,8 @@ export async function addSource(
     );
   }
 
-  const scope = common ? COMMON_SCOPE : boardId;
+  // null は上で common=true に倒しているため、ここでの boardId は文字列
+  const scope: string = common ? COMMON_SCOPE : (boardId as string);
   const id = newId();
   await saveOriginal(scope, id, fileName, buffer);
 
@@ -140,7 +162,7 @@ export async function addSource(
  * (抽出プロンプトの改善後などに、取り込みをやり直すため)。
  */
 export async function reextractSource(
-  boardId: string,
+  boardId: string | null,
   sourceId: string,
 ): Promise<KnowledgeState> {
   const scope = await scopeOf(boardId, sourceId);
@@ -173,7 +195,7 @@ export async function reextractSource(
 // ---- ソースの操作 -----------------------------------------------------------
 
 export async function setSourceEnabled(
-  boardId: string,
+  boardId: string | null,
   sourceId: string,
   enabled: boolean,
 ): Promise<KnowledgeState> {
@@ -188,7 +210,7 @@ export async function setSourceEnabled(
 }
 
 export async function deleteSource(
-  boardId: string,
+  boardId: string | null,
   sourceId: string,
 ): Promise<KnowledgeState> {
   const scope = await scopeOf(boardId, sourceId);
@@ -203,11 +225,52 @@ export async function deleteSource(
   return getKnowledgeState(boardId);
 }
 
+/**
+ * 資料を業務 ⇄ 共通の間で移動する(振り分けミスの修正用)。
+ * メタ・エントリ・原資料をまとめて移し、両スコープの skill を再レンダリングする。
+ * toCommon=false のときは boardId(現在のボード)へ移す。
+ */
+export async function moveSource(
+  boardId: string,
+  sourceId: string,
+  toCommon: boolean,
+): Promise<KnowledgeState> {
+  const from = await scopeOf(boardId, sourceId);
+  const to = toCommon ? COMMON_SCOPE : boardId;
+  if (from === to) return getKnowledgeState(boardId);
+
+  const fromSources = await readSources(from);
+  const meta = fromSources.find((s) => s.id === sourceId);
+  if (!meta) throw new Error("指定の資料が見つかりません");
+  const fromEntries = await readEntries(from);
+  const own = fromEntries.filter((e) => e.sourceId === sourceId);
+
+  // 先に原資料を移す(ここで失敗すれば JSON は無傷 = 中途半端な状態を作らない)
+  await moveSourceDir(from, to, sourceId);
+
+  // 移動先へ追加 → 移動元から除去
+  const toSources = await readSources(to);
+  const toEntries = await readEntries(to);
+  toSources.push({ ...meta, scope: toCommon ? "common" : "board" });
+  toEntries.push(...own);
+  await writeJson(sourcesFile(to), toSources);
+  await writeJson(knowledgeFile(to), toEntries);
+  await writeJson(sourcesFile(from), fromSources.filter((s) => s.id !== sourceId));
+  await writeJson(
+    knowledgeFile(from),
+    fromEntries.filter((e) => e.sourceId !== sourceId),
+  );
+
+  await renderSkills(from);
+  await renderSkills(to);
+  return getKnowledgeState(boardId);
+}
+
 // ---- 閲覧(出典確認・カテゴリビュー) ---------------------------------------
 
 /** カテゴリの知識(ボード + 共通、有効ソース由来)を閲覧用 Markdown で返す */
 export async function getCategoryMarkdown(
-  boardId: string,
+  boardId: string | null,
   category: KnowledgeCategory,
 ): Promise<{ label: string; markdown: string }> {
   const def = CATEGORIES.find((c) => c.category === category);
@@ -222,7 +285,7 @@ export async function getCategoryMarkdown(
 
 /** ソース 1 件から抽出されたエントリを閲覧用 Markdown で返す(出典確認用) */
 export async function getSourceMarkdown(
-  boardId: string,
+  boardId: string | null,
   sourceId: string,
 ): Promise<{ meta: SourceMeta; markdown: string }> {
   const { sources, entries } = await readAll(boardId);

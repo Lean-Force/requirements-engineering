@@ -10,6 +10,7 @@ export {
   getCategoryMarkdown,
   getKnowledgeState,
   getSourceMarkdown,
+  moveSource,
   reextractSource,
   setSourceEnabled,
 } from "./knowledge";

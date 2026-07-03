@@ -156,3 +156,83 @@ describe("知識ベース", () => {
     await expect(addSource(BOARD, "empty.txt", Buffer.from("x"))).rejects.toThrow("抽出できません");
   });
 });
+
+describe("共通ビューと業務⇄共通の移動", () => {
+  it("getKnowledgeState(null) は共通のみを返す(管理画面ビュー)", async () => {
+    extractMock.mockResolvedValue(entriesA);
+    await addSource(BOARD, "board.txt", Buffer.from("x"));
+    extractMock.mockResolvedValue([
+      { category: "terms", title: "共通用語", content: "c" },
+    ]);
+    await addSource(null, "common.txt", Buffer.from("x"));
+
+    const { getKnowledgeState } = await import("@/infrastructure/context");
+    const state = await getKnowledgeState(null);
+    expect(state.sources.map((s) => s.fileName)).toEqual(["common.txt"]);
+    expect(state.sources[0].scope).toBe("common");
+    expect(state.categories.find((c) => c.category === "flows")?.count).toBe(0);
+    expect(state.categories.find((c) => c.category === "terms")?.count).toBe(1);
+  });
+
+  it("moveSource: 業務 → 共通(エントリ・原資料ごと移り、両側の skill が更新される)", async () => {
+    const { moveSource, prepareSkillsForChat: prep } = await import(
+      "@/infrastructure/context"
+    );
+    extractMock.mockResolvedValue(entriesA);
+    const state = await addSource(BOARD, "memo.txt", Buffer.from("原文"));
+    const id = state.sources[0].id;
+
+    const moved = await moveSource(BOARD, id, true);
+    expect(moved.sources[0].scope).toBe("common");
+
+    // 業務側の skill は消え、チャット準備では kb-common-* として提示される
+    const skills = await prep(BOARD);
+    expect(skills).toEqual(
+      expect.arrayContaining(["kb-common-flows", "kb-common-terms"]),
+    );
+    expect(skills).not.toContain("kb-flows");
+
+    // 別ボードからも見える(共通になった)
+    const other = await prep("board-other");
+    expect(other).toContain("kb-common-flows");
+
+    // 原資料も移っている → 再抽出が共通側で動く
+    extractMock.mockResolvedValue([
+      { category: "flows", title: "改訂ルール", content: "改訂済み" },
+    ]);
+    const re = await reextractSource(BOARD, id);
+    expect(re.sources[0].entryCount).toBe(1);
+    expect(extractMock).toHaveBeenLastCalledWith("memo.txt", expect.stringContaining("原文"));
+  });
+
+  it("moveSource: 共通 → この業務(他ボードからは見えなくなる)", async () => {
+    const { moveSource, prepareSkillsForChat: prep } = await import(
+      "@/infrastructure/context"
+    );
+    extractMock.mockResolvedValue(entriesA);
+    const state = await addSource(null, "共通.txt", Buffer.from("x"));
+    const id = state.sources[0].id;
+
+    const moved = await moveSource(BOARD, id, false);
+    expect(moved.sources[0].scope).toBe("board");
+    expect(await prep(BOARD)).toEqual(
+      expect.arrayContaining(["kb-flows", "kb-terms"]),
+    );
+    expect(await prep("board-other")).toEqual([]);
+  });
+  it("moveSource: 原資料ディレクトリが無くても移動できる(旧データ耐性)", async () => {
+    const { moveSource } = await import("@/infrastructure/context");
+    // 原資料なしで直接シード(旧形式相当)
+    const { writeJson, sourcesFile, knowledgeFile } = await import(
+      "@/infrastructure/context/repository"
+    );
+    await writeJson(sourcesFile(BOARD), [
+      { id: "legacy", fileName: "old.txt", scope: "board", enabled: true, entryCount: 1, uploadedAt: "2026-01-01T00:00:00.000Z" },
+    ]);
+    await writeJson(knowledgeFile(BOARD), [
+      { id: "le", sourceId: "legacy", category: "flows", title: "旧", content: "x" },
+    ]);
+    const moved = await moveSource(BOARD, "legacy", true);
+    expect(moved.sources.find((s) => s.id === "legacy")?.scope).toBe("common");
+  });
+});

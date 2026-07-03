@@ -12,6 +12,8 @@ interface Props {
   onDelete: (id: string) => void;
   /** 保存済みの原ファイルから知識を再抽出する(エラー文字列を返すと表示) */
   onReextract: (id: string) => Promise<string | null>;
+  /** 資料を業務 ⇄ 共通の間で移動する(toCommon = true で共通へ) */
+  onMove: (id: string, toCommon: boolean) => Promise<string | null>;
   /** カテゴリ / ソースの閲覧用 Markdown を取得する(データ取得は親が担う) */
   loadCategory: (category: string) => Promise<string>;
   loadSource: (id: string) => Promise<string>;
@@ -30,6 +32,7 @@ export default function ContextPanel({
   onToggle,
   onDelete,
   onReextract,
+  onMove,
   loadCategory,
   loadSource,
   onClose,
@@ -52,6 +55,17 @@ export default function ContextPanel({
     const message = await onReextract(id);
     if (message) setError(message);
     setReextracting(null);
+  };
+
+  const move = async (s: SourceMeta) => {
+    const toCommon = s.scope === "board";
+    const confirmText = toCommon
+      ? `「${s.fileName}」を共通知識へ移動しますか?\n全ボードから参照されるようになります。`
+      : `「${s.fileName}」をこのボード(業務)の知識へ移動しますか?\n他のボードからは参照できなくなります。`;
+    if (!window.confirm(confirmText)) return;
+    setError(null);
+    const message = await onMove(s.id, toCommon);
+    if (message) setError(message);
   };
 
   const handleFiles = async (files: FileList | null) => {
@@ -102,6 +116,17 @@ export default function ContextPanel({
           </button>
         </div>
         <div className="context-item-ops">
+          <button
+            className="context-move"
+            onClick={() => move(s)}
+            title={
+              s.scope === "board"
+                ? "共通知識へ移動(全ボードで参照される)"
+                : "この業務の知識へ移動(他ボードから見えなくなる)"
+            }
+          >
+            {s.scope === "board" ? "🌐" : "📥"}
+          </button>
           <button
             className="context-reextract"
             onClick={() => reextract(s.id)}

@@ -358,6 +358,25 @@ export default function BoardPage({ params }: Props) {
     [api],
   );
 
+  const moveContext = useCallback(
+    async (id: string, toCommon: boolean): Promise<string | null> => {
+      try {
+        const res = await fetch(`${api}/contexts/${id}/move`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ common: toCommon }),
+        });
+        const data = await res.json();
+        if (!res.ok) return (data.error as string) ?? "移動に失敗しました";
+        setKnowledge(data as KnowledgeState);
+        return null;
+      } catch (e) {
+        return e instanceof Error ? e.message : "移動に失敗しました";
+      }
+    },
+    [api],
+  );
+
   // 閲覧用 Markdown の取得(失敗時はエラーメッセージ文字列を返す = パネルはそのまま表示)
   const loadCategoryMarkdown = useCallback(
     async (category: string): Promise<string> => {
@@ -466,6 +485,7 @@ export default function BoardPage({ params }: Props) {
             onToggle={toggleContext}
             onDelete={deleteContextDoc}
             onReextract={reextractContext}
+            onMove={moveContext}
             loadCategory={loadCategoryMarkdown}
             loadSource={loadSourceMarkdown}
             onClose={() => setShowContexts(false)}

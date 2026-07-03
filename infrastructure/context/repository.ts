@@ -55,3 +55,22 @@ export async function readOriginal(
 export async function removeSourceDir(scope: string, id: string): Promise<void> {
   await fs.rm(sourceDir(scope, id), { recursive: true, force: true });
 }
+
+/**
+ * 原資料ディレクトリをスコープ間で移動する(業務 ⇄ 共通の付け替え用)。
+ * 原資料が無い場合(旧形式のデータなど)はスキップする。
+ */
+export async function moveSourceDir(
+  fromScope: string,
+  toScope: string,
+  id: string,
+): Promise<void> {
+  const dest = sourceDir(toScope, id);
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  try {
+    await fs.rename(sourceDir(fromScope, id), dest);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
+}

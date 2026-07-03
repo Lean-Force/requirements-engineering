@@ -250,6 +250,10 @@ body,html{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
 .chat-retry{display:block;margin-top:8px;padding:5px 14px;font-size:12px;border:1px solid var(--accent);border-radius:8px;background:var(--panel);color:var(--accent);cursor:pointer}
 .chat-retry:hover{background:var(--accent);color:#fff}
 .context-item-ops{display:flex;align-items:center;gap:2px;flex:0 0 auto}
-.context-reextract{border:none;background:transparent;font-size:12px;line-height:1;color:var(--muted);cursor:pointer;padding:2px}
-.context-reextract:hover:not(:disabled){color:var(--accent)}
+.context-reextract,.context-move{border:none;background:transparent;font-size:12px;line-height:1;color:var(--muted);cursor:pointer;padding:2px}
+.context-reextract:hover:not(:disabled),.context-move:hover{color:var(--accent)}
 .context-reextract:disabled{opacity:.5;cursor:progress}
+.board-switcher-knowledge{display:block;padding:8px 10px 6px;margin-top:2px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);text-decoration:none;border-radius:0 0 10px 10px}
+.board-switcher-knowledge:hover{color:var(--accent);background:var(--accent-soft)}
+.knowledge-admin-list{max-width:720px}
+.board-list-header .sub a{color:var(--accent)}
