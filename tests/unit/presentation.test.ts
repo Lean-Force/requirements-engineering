@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const extractMock = vi.fn();
 vi.mock("@/infrastructure/agent", () => ({
-  extractKnowledge: (...args: unknown[]) => extractMock(...args),
+  extractKnowledgeMulti: (...args: unknown[]) => extractMock(...args),
 }));
 
 import { createBoard } from "@/infrastructure/boards";

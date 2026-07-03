@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // LLM 抽出をモック(agent モジュールごと差し替え。ゲートウェイの他機能は使わない)
 const extractMock = vi.fn();
 vi.mock("@/infrastructure/agent", () => ({
-  extractKnowledge: (...args: unknown[]) => extractMock(...args),
+  extractKnowledgeMulti: (...args: unknown[]) => extractMock(...args),
 }));
 
 import { createBoard } from "@/infrastructure/boards";

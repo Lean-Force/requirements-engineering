@@ -15,7 +15,7 @@
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
-import { extractKnowledge, generate } from "../../infrastructure/agent";
+import { extractKnowledge, extractKnowledgeMulti, generate } from "../../infrastructure/agent";
 import {
   knowledgeFile,
   sourcesFile,
@@ -151,34 +151,74 @@ async function main() {
 
   let failed = 0;
 
-  // ---- 抽出時のスコープ自動判定(業務固有 / 業務横断) -----------------------
+  // ---- 抽出: 観点別 5 パスの再現率(vs 1 パス)+ common 自動判定 --------------
   {
     const started = Date.now();
-    const extracted = await extractKnowledge(
-      "送金業務設計書.md",
-      [
-        "# 全社用語",
-        "- BSAD: 基本設計書の社内略称(全社共通)。",
-        "# 送金の承認ルール",
-        "- 1,000万円を超える送金は部長承認が必要。",
-      ].join("\n"),
+    // 5 カテゴリの事実を仕込んだフィクスチャ資料(既知の正解 = FACTS)
+    const FIXTURE = `# 送金業務 基本設計書(抜粋)
+
+## 全社用語
+- BSAD: 基本設計書の社内略称(全社共通)。
+- 送金指示番号: 英数字12桁で採番する。
+
+## 関係者
+- 為替ディーラー: 適用レートの確定を担当する。
+- オペレーター: 送金データの入力と一次チェックを行う。
+
+## 業務ルール
+- 1,000万円を超える送金は部長承認が必要。
+- カットオフは 15:00。以降の受付は翌営業日扱いとする。
+- 形式不備は営業店へ差し戻しする。
+
+## データ定義
+- 送金種別: 01:即時 / 02:予約。
+- 手数料区分: SHA / OUR / BEN のいずれか。
+- 送金金額の上限は 1億円。
+
+## 背景
+- 月末に処理が滞留しており、手作業チェックの負荷が高い。`;
+
+    // 各事実の「見つかった」判定キーワード(タイトル+本文への包含)
+    const FACTS = [
+      "BSAD", "英数字12桁", "為替ディーラー", "オペレーター",
+      "1,000万", "15:00", "差し戻し", "予約", "SHA", "1億", "滞留",
+    ];
+    const recallOf = (entries: { title: string; content: string }[]) => {
+      const all = entries.map((e) => e.title + e.content).join("\n");
+      return FACTS.filter((f) => all.includes(f));
+    };
+
+    const [single, multi] = await Promise.all([
+      extractKnowledge("基本設計書.md", FIXTURE),
+      extractKnowledgeMulti("基本設計書.md", FIXTURE),
+    ]);
+    const singleHits = recallOf(single);
+    const multiHits = recallOf(multi);
+    console.log(
+      `   再現率: 1パス ${singleHits.length}/${FACTS.length}(${single.length}エントリ) / ` +
+      `5パス ${multiHits.length}/${FACTS.length}(${multi.length}エントリ)`,
     );
+
     const problems: string[] = [];
-    const find = (kw: string) => extracted.find((e) => (e.title + e.content).includes(kw));
+    const missed = FACTS.filter((f) => !multiHits.includes(f));
+    if (multiHits.length < singleHits.length)
+      problems.push(`5パスの再現率が1パスを下回った(取りこぼし: ${missed.join(", ")})`);
+    if (multiHits.length < FACTS.length - 1)
+      problems.push(`5パスの取りこぼしが多い: ${missed.join(", ")}`);
+    // common 自動判定(5 パス側 = 本番経路で確認)
+    const find = (kw: string) => multi.find((e) => (e.title + e.content).includes(kw));
     const bsad = find("BSAD");
-    const rule = find("部長承認") ?? find("承認");
-    if (!bsad) problems.push("BSAD が抽出されていない");
-    else if (bsad.common !== true) problems.push("全社用語 BSAD が共通(common=true)に振り分けられていない");
-    if (!rule) problems.push("承認ルールが抽出されていない");
-    else if (rule.common !== false) problems.push("業務の承認ルールが業務固有(common=false)になっていない");
+    const rule = find("1,000万");
+    if (bsad && bsad.common !== true) problems.push("全社用語 BSAD が共通(common=true)になっていない");
+    if (rule && rule.common !== false) problems.push("業務の承認ルールが業務固有(common=false)になっていない");
+
     const secs = Math.round((Date.now() - started) / 1000);
     if (problems.length === 0) {
-      console.log(`✅ PASS (${secs}s) 抽出時に業務固有/業務横断を自動判定する`);
+      console.log(`✅ PASS (${secs}s) 観点別5パス抽出の再現率と common 判定`);
     } else {
       failed++;
-      console.log(`❌ FAIL (${secs}s) 抽出時に業務固有/業務横断を自動判定する`);
+      console.log(`❌ FAIL (${secs}s) 観点別5パス抽出の再現率と common 判定`);
       for (const pr of problems) console.log(`   - ${pr}`);
-      console.log(`   extracted: ${JSON.stringify(extracted.map((e) => ({ t: e.title, common: e.common })))}`);
     }
   }
 

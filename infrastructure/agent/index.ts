@@ -32,7 +32,8 @@ import type { StoryMap } from "@/domain";
 import { dataRoot, workspaceDir } from "../context/workspace";
 import { boardToolsServer } from "./board-tools";
 import {
-  EXTRACT_SYSTEM_PROMPT,
+  EXTRACT_CATEGORY_DEFS,
+  extractSystemPrompt,
   REFINE_SYSTEM_PROMPT,
   SYSTEM_PROMPT,
 } from "./prompts";
@@ -230,10 +231,15 @@ export interface ExtractedEntry {
   common: boolean;
 }
 
-/** 資料(Markdown 化済み)からドメイン知識エントリを抽出する(ツールなし 1 ターン) */
+/**
+ * 資料(Markdown 化済み)からドメイン知識エントリを抽出する(ツールなし 1 ターン)。
+ * focus を指定すると、そのカテゴリだけを深く拾う観点別パスになる
+ * (返るエントリの category は focus に固定する)。
+ */
 export async function extractKnowledge(
   fileName: string,
   markdown: string,
+  focus?: KnowledgeCategory,
 ): Promise<ExtractedEntry[]> {
   // cwd に指定するため、まだ無ければ作る(無いと spawn に失敗する)。
   // 抽出はツールを使わないためスコープに依存しない(データルート直下で実行)。
@@ -243,7 +249,7 @@ export async function extractKnowledge(
     options: {
       model: process.env.ANTHROPIC_MODEL || undefined,
       cwd: dataRoot(),
-      systemPrompt: EXTRACT_SYSTEM_PROMPT,
+      systemPrompt: extractSystemPrompt(focus),
       settingSources: [],
       allowedTools: [],
       maxTurns: 4,
@@ -259,6 +265,7 @@ export async function extractKnowledge(
           at: new Date().toISOString(),
           kind: "extract-usage",
           fileName,
+          focus: focus ?? "all",
           usage: message.usage,
           costUsd: message.total_cost_usd,
         }),
@@ -267,7 +274,10 @@ export async function extractKnowledge(
         | { entries: ExtractedEntry[] }
         | undefined;
       if (!output) throw new Error("知識の抽出結果が得られませんでした");
-      return output.entries;
+      // 観点別パスでは category を担当カテゴリに固定する(混入防止)
+      return focus
+        ? output.entries.map((e) => ({ ...e, category: focus }))
+        : output.entries;
     }
     const errors =
       "errors" in message && Array.isArray(message.errors)
@@ -276,6 +286,28 @@ export async function extractKnowledge(
     throw new Error(`知識の抽出に失敗しました: ${errors}`);
   }
   throw new Error("知識の抽出で有効な応答が得られませんでした");
+}
+
+/**
+ * 観点別 5 パス並列の知識抽出。同じ資料をカテゴリ専用プロンプトで並列に読み、
+ * 結果をカテゴリ順にマージする。1 パスに全カテゴリを任せるより拾い漏れが減る
+ * (比較は tests/eval の再現率ケースで測る)。一時的な失敗はパス単位で 1 回リトライ。
+ */
+export async function extractKnowledgeMulti(
+  fileName: string,
+  markdown: string,
+): Promise<ExtractedEntry[]> {
+  const passes = await Promise.all(
+    EXTRACT_CATEGORY_DEFS.map(async ({ category }) => {
+      try {
+        return await extractKnowledge(fileName, markdown, category);
+      } catch {
+        // 並列パスの片肺失敗で取り込み全体を落とさないよう 1 回だけやり直す
+        return extractKnowledge(fileName, markdown, category);
+      }
+    }),
+  );
+  return passes.flat();
 }
 
 // ---- 内部 ----------------------------------------------------------------

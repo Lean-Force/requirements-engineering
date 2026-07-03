@@ -24,7 +24,7 @@ import type {
   KnowledgeState,
   SourceMeta,
 } from "@/contracts";
-import { extractKnowledge } from "../agent";
+import { extractKnowledgeMulti } from "../agent";
 import { listBoards } from "../boards";
 import { isSupportedFile, parseFile } from "./parse";
 import {
@@ -125,7 +125,7 @@ export async function addSource(
   const markdown = await toMarkdown(fileName, buffer);
 
   // LLM でドメイン知識エントリへ分解する(失敗したら取り込み自体を失敗させる)
-  const extracted = await extractKnowledge(fileName, markdown);
+  const extracted = await extractKnowledgeMulti(fileName, markdown);
   if (extracted.length === 0) {
     throw new Error(
       `ドメイン知識を抽出できませんでした: ${fileName}(内容を確認してください)`,
@@ -171,7 +171,7 @@ export async function reextractSource(
   const buffer = await readOriginal(scope, sourceId, meta.fileName);
   const markdown = await toMarkdown(meta.fileName, buffer);
 
-  const extracted = await extractKnowledge(meta.fileName, markdown);
+  const extracted = await extractKnowledgeMulti(meta.fileName, markdown);
   if (extracted.length === 0) {
     throw new Error(`ドメイン知識を抽出できませんでした: ${meta.fileName}`);
   }
