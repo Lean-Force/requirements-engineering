@@ -34,7 +34,7 @@ export default function HistoryPanel({
   return (
     <div className="history-panel">
       <div className="history-header">
-        <span>版履歴(最新{versions.length})</span>
+        <span>Versions(最新{versions.length})</span>
         <button className="history-close" onClick={onClose} aria-label="閉じる">
           ×
         </button>

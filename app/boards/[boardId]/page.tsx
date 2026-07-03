@@ -44,6 +44,17 @@ export default function BoardPage({ params }: Props) {
   const [remoteBusy, setRemoteBusy] = useState(false);
   const [ready, setReady] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  // 会話パネルの折りたたみ(ボードを広く使う。状態はブラウザに保持)
+  const [chatCollapsed, setChatCollapsed] = useState(false);
+  useEffect(() => {
+    setChatCollapsed(localStorage.getItem("usm-chat-collapsed") === "1");
+  }, []);
+  const toggleChat = useCallback(() => {
+    setChatCollapsed((prev) => {
+      localStorage.setItem("usm-chat-collapsed", prev ? "0" : "1");
+      return !prev;
+    });
+  }, []);
   const [showContexts, setShowContexts] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   // ボードの 📌 で選んだ付箋(ストーリー / 行動。次のチャット送信の対象として AI に渡す)
@@ -504,7 +515,7 @@ export default function BoardPage({ params }: Props) {
                 : ""}
             </button>
             <button className="history-toggle" onClick={openHistory}>
-              版履歴{versions.length > 0 ? `(${versions.length})` : ""}
+              Versions{versions.length > 0 ? `(${versions.length})` : ""}
             </button>
           </div>
         </header>
@@ -546,16 +557,30 @@ export default function BoardPage({ params }: Props) {
           />
         )}
       </div>
-      <ChatPanel
-        messages={messages}
-        loading={loading}
-        remoteBusy={remoteBusy}
-        selectedTarget={selectedTarget}
-        onClearSelection={() => setSelectedTarget(null)}
-        onSend={sendMessage}
-        onRetry={retryLast}
-        onClear={clearChat}
-      />
+      {chatCollapsed ? (
+        <div className="chat-rail">
+          <button
+            className="chat-expand"
+            onClick={toggleChat}
+            title="AI チャットを開く"
+          >
+            💬
+          </button>
+          {(loading || remoteBusy) && <span className="chat-rail-busy">…</span>}
+        </div>
+      ) : (
+        <ChatPanel
+          messages={messages}
+          loading={loading}
+          remoteBusy={remoteBusy}
+          selectedTarget={selectedTarget}
+          onClearSelection={() => setSelectedTarget(null)}
+          onSend={sendMessage}
+          onRetry={retryLast}
+          onClear={clearChat}
+          onCollapse={toggleChat}
+        />
+      )}
     </div>
   );
 }

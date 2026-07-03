@@ -15,6 +15,8 @@ interface Props {
   /** 末尾がエラーのとき、同じ内容で再送する */
   onRetry?: () => void;
   onClear?: () => void;
+  /** パネルを横に閉じる(未指定ならボタン非表示) */
+  onCollapse?: () => void;
 }
 
 // skill 名 → 表示ラベル(参照した知識の表示用)
@@ -45,6 +47,7 @@ export default function ChatPanel({
   onSend,
   onRetry,
   onClear,
+  onCollapse,
 }: Props) {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -76,11 +79,23 @@ export default function ChatPanel({
     <div className="chat-panel">
       <div className="chat-header">
         <span>AI チャット</span>
-        {onClear && messages.length > 0 && (
-          <button className="chat-clear" onClick={onClear} disabled={loading}>
-            会話をクリア
-          </button>
-        )}
+        <span className="chat-header-ops">
+          {onClear && messages.length > 0 && (
+            <button className="chat-clear" onClick={onClear} disabled={loading}>
+              会話をクリア
+            </button>
+          )}
+          {onCollapse && (
+            <button
+              className="chat-collapse"
+              onClick={onCollapse}
+              title="チャットを横に閉じる"
+              aria-label="チャットを閉じる"
+            >
+              ⏵
+            </button>
+          )}
+        </span>
       </div>
 
       <div className="chat-messages" ref={scrollRef}>
