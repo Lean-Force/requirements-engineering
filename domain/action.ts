@@ -1,7 +1,7 @@
 // エンティティ: Action(行動 = あるアクターの、ある Activity での行動)。
 // Story は必ずこの Action の下に保持される。
 import { genId } from "./id";
-import { createStory, withText as renameStory, type Story } from "./story";
+import { createStory, withFixed, withText as renameStory, type Story } from "./story";
 
 export interface Action {
   id: string;
@@ -35,4 +35,11 @@ export function withRenamedStory(action: Action, storyId: string, text: string):
 
 export function withoutStory(action: Action, storyId: string): Action {
   return { ...action, stories: action.stories.filter((s) => s.id !== storyId) };
+}
+
+export function withStoryFixed(action: Action, storyId: string, fixed: boolean): Action {
+  return {
+    ...action,
+    stories: action.stories.map((s) => (s.id === storyId ? withFixed(s, fixed) : s)),
+  };
 }

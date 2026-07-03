@@ -18,8 +18,10 @@ import {
   withNewStory,
   withRenamedStory,
   withoutStory,
+  withStoryFixed,
   type Action,
 } from "./action";
+import type { Story } from "./story";
 
 export interface StoryMap {
   actors: Actor[];
@@ -48,7 +50,12 @@ export function normalizeStoryMap(map: StoryMap): StoryMap {
       id: a.id,
       actorId: validIds.has(a.actorId) ? a.actorId : fallbackId,
       text: a.text,
-      stories: (a.stories ?? []).map((st) => ({ id: st.id, text: st.text })),
+      stories: (a.stories ?? []).map((st) => ({
+        id: st.id,
+        text: st.text,
+        // 確定フラグは true のときだけ保持(JSON を汚さない)
+        ...(st.fixed === true ? { fixed: true as const } : {}),
+      })),
     })),
   }));
 
@@ -176,6 +183,128 @@ export function removeStory(
   return mapActivity(map, activityId, (act) =>
     mapAction(act, actionId, (a) => withoutStory(a, storyId)),
   );
+}
+
+/** ストーリーの確定(fix)状態を切り替える */
+export function setStoryFixed(
+  map: StoryMap,
+  activityId: string,
+  actionId: string,
+  storyId: string,
+  fixed: boolean,
+): StoryMap {
+  return mapActivity(map, activityId, (act) =>
+    mapAction(act, actionId, (a) => withStoryFixed(a, storyId, fixed)),
+  );
+}
+
+/**
+ * 確定(fixed)ストーリーの保護を強制する純粋関数。
+ * AI の出力(after)が確定ストーリーを変更・削除していた場合、変更前(before)の
+ * 内容へ復元する。プロンプトでの指示に加えた、サーバー側の最終防衛線。
+ *
+ * 復元先は「同じ action」→ 無ければ「同じ activity に元の action を再作成」→
+ * それも無ければ「元の activity ごと末尾に再作成」の順で探す。
+ */
+export function enforceFixedStories(before: StoryMap, after: StoryMap): StoryMap {
+  // before 側の確定ストーリーと、その居場所を控える
+  const fixedStories: {
+    story: Story;
+    activity: Activity;
+    action: Action;
+  }[] = [];
+  for (const activity of before.activities) {
+    for (const action of activity.actions) {
+      for (const story of action.stories) {
+        if (story.fixed === true) fixedStories.push({ story, activity, action });
+      }
+    }
+  }
+  if (fixedStories.length === 0) return after;
+
+  let result = after;
+  for (const { story, activity, action } of fixedStories) {
+    result = restoreFixedStory(result, story, activity, action);
+  }
+  return result;
+}
+
+function restoreFixedStory(
+  map: StoryMap,
+  original: Story,
+  originalActivity: Activity,
+  originalAction: Action,
+): StoryMap {
+  // 出力側のどこかに残っているか探す(移動は許容し、内容と確定フラグだけ守る)
+  for (const activity of map.activities) {
+    for (const action of activity.actions) {
+      if (action.stories.some((s) => s.id === original.id)) {
+        return {
+          ...map,
+          activities: map.activities.map((act) =>
+            act.id !== activity.id
+              ? act
+              : {
+                  ...act,
+                  actions: act.actions.map((a) =>
+                    a.id !== action.id
+                      ? a
+                      : {
+                          ...a,
+                          stories: a.stories.map((s) =>
+                            s.id === original.id ? { ...original } : s,
+                          ),
+                        },
+                  ),
+                },
+          ),
+        };
+      }
+    }
+  }
+
+  // 消されていた場合: 元の action → 元の activity → マップ末尾の順で復元する
+  const targetActivity = map.activities.find((a) =>
+    a.actions.some((ac) => ac.id === originalAction.id),
+  );
+  if (targetActivity) {
+    return {
+      ...map,
+      activities: map.activities.map((act) =>
+        act.id !== targetActivity.id
+          ? act
+          : {
+              ...act,
+              actions: act.actions.map((a) =>
+                a.id !== originalAction.id
+                  ? a
+                  : { ...a, stories: [...a.stories, { ...original }] },
+              ),
+            },
+      ),
+    };
+  }
+
+  const revivedAction: Action = { ...originalAction, stories: [{ ...original }] };
+  const sameActivity = map.activities.find((a) => a.id === originalActivity.id);
+  if (sameActivity) {
+    return {
+      ...map,
+      activities: map.activities.map((act) =>
+        act.id !== originalActivity.id
+          ? act
+          : { ...act, actions: [...act.actions, revivedAction] },
+      ),
+    };
+  }
+
+  return {
+    ...map,
+    activities: [
+      ...map.activities,
+      { ...originalActivity, actions: [revivedAction] },
+    ],
+  };
 }
 
 export { actionOf };

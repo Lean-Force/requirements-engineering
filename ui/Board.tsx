@@ -16,7 +16,7 @@ interface Props {
 type Editor =
   | { mode: "story-pick"; activityId: string } // どのアクターの行動に足すか選択中
   | { mode: "story-add"; activityId: string; actionId: string } // 新規ストーリーを入力中
-  | { mode: "story-edit"; activityId: string; actionId: string; storyId: string; initial: string }
+  | { mode: "story-edit"; activityId: string; actionId: string; storyId: string; initial: string; initialFixed: boolean }
   | { mode: "action-add"; activityId: string; actorId: string } // 空セルに行動を入力中
   | { mode: "action-edit"; activityId: string; actionId: string; initial: string }
   | { mode: "actor-add" }; // 新規アクター名を入力中
@@ -76,23 +76,27 @@ function InlineInput({
 }
 
 // ストーリー編集モーダル。Cmd/Ctrl+Enter 保存 / Esc 取消。空で保存すると削除。
+// 確定(fix)中は本文編集・削除を無効化する(先に確定を解除する)。
 // PanZoom の transform の影響を受けないよう body へポータルで出す。
 function StoryEditModal({
   initial,
+  initialFixed,
   color,
   onCommit,
   onCancel,
 }: {
   initial: string;
+  initialFixed: boolean;
   color: { bg: string; border: string };
-  onCommit: (text: string) => void;
+  onCommit: (text: string, fixed: boolean) => void;
   onCancel: () => void;
 }) {
   const [text, setText] = useState(initial);
+  const [fixed, setFixed] = useState(initialFixed);
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
       e.preventDefault();
-      onCommit(text);
+      onCommit(text, fixed);
     } else if (e.key === "Escape") {
       e.preventDefault();
       onCancel();
@@ -113,22 +117,37 @@ function StoryEditModal({
           autoFocus
           rows={5}
           value={text}
+          disabled={fixed}
           placeholder="ストーリー(例: 店員は…したい。なぜなら…だからだ。)"
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
         />
+        <label className="story-modal-fixed">
+          <input
+            type="checkbox"
+            checked={fixed}
+            onChange={(e) => setFixed(e.target.checked)}
+          />
+          🔒 確定(チーム合意済み)— AI もメンバーも変更・削除できなくなる
+        </label>
         <div className="story-modal-hint">
-          「(アクター)は〜したい。なぜなら〜だからだ。」の形を推奨。⌘/Ctrl + Enter で保存
+          {fixed
+            ? "確定中は本文の編集と削除ができません。変更するには先に確定を外してください。"
+            : "「(アクター)は〜したい。なぜなら〜だからだ。」の形を推奨。⌘/Ctrl + Enter で保存"}
         </div>
         <div className="story-modal-actions">
-          <button className="story-modal-delete" onClick={() => onCommit("")}>
+          <button
+            className="story-modal-delete"
+            onClick={() => onCommit("", false)}
+            disabled={fixed}
+          >
             削除
           </button>
           <div className="story-modal-actions-right">
             <button className="story-modal-cancel" onClick={onCancel}>
               キャンセル
             </button>
-            <button className="story-modal-save" onClick={() => onCommit(text)}>
+            <button className="story-modal-save" onClick={() => onCommit(text, fixed)}>
               保存
             </button>
           </div>
@@ -244,12 +263,22 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
     actionId: string,
     storyId: string,
     text: string,
+    fixed: boolean,
   ) => {
     setEditor(null);
+    if (!text.trim()) {
+      // 空 = 削除(確定中はモーダル側で無効化されている)
+      onChange(domain.removeStory(storyMap, activityId, actionId, storyId));
+      return;
+    }
     onChange(
-      text.trim()
-        ? domain.renameStory(storyMap, activityId, actionId, storyId, text.trim())
-        : domain.removeStory(storyMap, activityId, actionId, storyId),
+      domain.setStoryFixed(
+        domain.renameStory(storyMap, activityId, actionId, storyId, text.trim()),
+        activityId,
+        actionId,
+        storyId,
+        fixed,
+      ),
     );
   };
 
@@ -453,9 +482,9 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
                         return action.stories.map((st) => (
                             <div
                               key={st.id}
-                              className="story-card clickable"
+                              className={`story-card clickable${st.fixed ? " fixed" : ""}`}
                               data-action-id={action.id}
-                              title={st.text}
+                              title={st.fixed ? `🔒 確定済み: ${st.text}` : st.text}
                               style={{ background: c.bg, borderColor: c.border }}
                               onClick={() =>
                                 setEditor({
@@ -464,10 +493,12 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
                                   actionId: action.id,
                                   storyId: st.id,
                                   initial: st.text,
+                                  initialFixed: st.fixed === true,
                                 })
                               }
                             >
                               <span style={{ fontSize: noteFontSize(st.text) }}>
+                                {st.fixed && <span className="story-lock">🔒</span>}
                                 {st.text}
                               </span>
                               {onPickStory && (
@@ -482,16 +513,18 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
                                   📌
                                 </button>
                               )}
-                              <button
-                                className="del-story"
-                                title="このストーリーを削除"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  removeStoryCard(activity.id, action.id, st.id);
-                                }}
-                              >
-                                ×
-                              </button>
+                              {!st.fixed && (
+                                <button
+                                  className="del-story"
+                                  title="このストーリーを削除"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeStoryCard(activity.id, action.id, st.id);
+                                  }}
+                                >
+                                  ×
+                                </button>
+                              )}
                             </div>
                           ),
                         );
@@ -566,14 +599,15 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
         <StoryEditModal
           key={editor.storyId}
           initial={editor.initial}
+          initialFixed={editor.initialFixed}
           color={(() => {
             const activity = activities.find((a) => a.id === editor.activityId);
             return activity
               ? actorColorByAction(activity, editor.actionId)
               : ACTOR_COLORS[0];
           })()}
-          onCommit={(t) =>
-            commitEditStory(editor.activityId, editor.actionId, editor.storyId, t)
+          onCommit={(t, fixed) =>
+            commitEditStory(editor.activityId, editor.actionId, editor.storyId, t, fixed)
           }
           onCancel={() => setEditor(null)}
         />

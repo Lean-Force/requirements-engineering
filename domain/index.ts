@@ -35,4 +35,6 @@ export {
   addStory,
   renameStory,
   removeStory,
+  setStoryFixed,
+  enforceFixedStories,
 } from "./story-map";
