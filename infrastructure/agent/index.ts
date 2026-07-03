@@ -55,7 +55,7 @@ export async function generate(
   boardId: string,
   conversation: ChatMessage[],
   skillNames: string[],
-): Promise<Pick<ChatResponse, "reply" | "storyMap">> {
+): Promise<Pick<ChatResponse, "reply" | "storyMap" | "usedSkills">> {
   const workspace = workspaceDir(boardId);
   // cwd に指定するため、初回チャット時などまだ無ければ作る(無いと spawn に失敗する)
   await fs.mkdir(workspace, { recursive: true });
@@ -116,7 +116,26 @@ export async function generate(
     },
   });
 
+  // AI が実際に読んだドメイン知識。skill の読み込みは Skill ツール
+  // ({skill: "kb-…"})で行われる。SKILL.md を直接 Read するケースも保険で拾う。
+  // 「読むべき時に読んだか」の eval と、参照表示に使う。
+  const usedSkills = new Set<string>();
+
   for await (const message of q) {
+    if (message.type === "assistant") {
+      for (const block of message.message.content) {
+        if (block.type !== "tool_use") continue;
+        if (block.name === "Skill") {
+          const skill = (block.input as { skill?: string }).skill ?? "";
+          if (skill.startsWith("kb-")) usedSkills.add(skill);
+        } else if (block.name === "Read") {
+          const filePath = (block.input as { file_path?: string }).file_path ?? "";
+          const hit = /\.claude\/skills\/(kb-[^/]+)\/SKILL\.md$/.exec(filePath);
+          if (hit) usedSkills.add(hit[1]);
+        }
+      }
+      continue;
+    }
     if (message.type !== "result") continue;
 
     if (message.subtype === "success") {
@@ -127,6 +146,7 @@ export async function generate(
           kind: "chat-usage",
           turns: message.num_turns,
           durationMs: message.duration_ms,
+          usedSkills: [...usedSkills],
           usage: message.usage,
           costUsd: message.total_cost_usd,
         }),
@@ -137,7 +157,7 @@ export async function generate(
       if (!output) {
         throw new Error("モデルから構造化出力が得られませんでした");
       }
-      return output;
+      return { ...output, usedSkills: [...usedSkills] };
     }
 
     // result のエラー種別(ループ上限・構造化出力の失敗など)

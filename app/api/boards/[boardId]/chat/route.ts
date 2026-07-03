@@ -96,7 +96,12 @@ ${JSON.stringify(currentMap)}`,
         fullConversation,
       );
 
-      const result: ChatResponse = { reply: parsed.reply, storyMap, versions };
+      const result: ChatResponse = {
+        reply: parsed.reply,
+        storyMap,
+        versions,
+        usedSkills: parsed.usedSkills,
+      };
       return NextResponse.json(result);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

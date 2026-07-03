@@ -41,6 +41,8 @@ export interface ChatResponse {
   reply: string;
   storyMap: StoryMap;
   versions?: StoryMapVersionMeta[];
+  /** このターンで AI が実際に読んだドメイン知識 skill 名(kb-*)。eval・参照表示用 */
+  usedSkills?: string[];
 }
 
 /**

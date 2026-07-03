@@ -4,10 +4,15 @@
 // このテストはそれを vitest から実行し、違反を「どのファイルがどのルールを
 // 破ったか」まで表示して失敗させる。npm run check:deps(CLI)と同じルールが
 // npm run test:unit でも守られる。
+import { createRequire } from "module";
 import { describe, expect, it } from "vitest";
 import { cruise } from "dependency-cruiser";
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-import config = require("../../.dependency-cruiser.cjs");
+import type { IConfiguration } from "dependency-cruiser";
+
+// .dependency-cruiser.cjs(CommonJS)をルールの唯一の正として読み込む
+const config = createRequire(import.meta.url)(
+  "../../.dependency-cruiser.cjs",
+) as IConfiguration;
 
 describe("アーキテクチャ(層の依存ルール)", () => {
   it("依存ルール違反がない", async () => {
