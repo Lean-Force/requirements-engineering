@@ -12,6 +12,8 @@ interface Props {
   onUpload: (files: FileList, common: boolean) => Promise<string | null>;
   onToggle: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
+  /** 保存済みの原ファイルから知識を再抽出する(エラー文字列を返すと表示) */
+  onReextract: (id: string) => Promise<string | null>;
   onClose: () => void;
 }
 
@@ -27,6 +29,7 @@ export default function ContextPanel({
   onUpload,
   onToggle,
   onDelete,
+  onReextract,
   onClose,
 }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
@@ -35,8 +38,19 @@ export default function ContextPanel({
   const [asCommon, setAsCommon] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewer, setViewer] = useState<Viewer | null>(null);
+  // 再抽出中のソース id
+  const [reextracting, setReextracting] = useState<string | null>(null);
 
   const pickFiles = () => fileInput.current?.click();
+
+  const reextract = async (id: string) => {
+    if (reextracting) return;
+    setReextracting(id);
+    setError(null);
+    const message = await onReextract(id);
+    if (message) setError(message);
+    setReextracting(null);
+  };
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -107,16 +121,29 @@ export default function ContextPanel({
             {s.fileName}
           </button>
         </div>
-        <button
-          className="context-delete"
-          onClick={() => onDelete(s.id)}
-          aria-label="削除"
-          title="削除(抽出済みの知識も消えます)"
-        >
-          ×
-        </button>
+        <div className="context-item-ops">
+          <button
+            className="context-reextract"
+            onClick={() => reextract(s.id)}
+            disabled={reextracting !== null}
+            aria-label="再抽出"
+            title="原ファイルから知識を再抽出する"
+          >
+            {reextracting === s.id ? "…" : "🔄"}
+          </button>
+          <button
+            className="context-delete"
+            onClick={() => onDelete(s.id)}
+            aria-label="削除"
+            title="削除(抽出済みの知識も消えます)"
+          >
+            ×
+          </button>
+        </div>
       </div>
-      <div className="context-meta">{s.entryCount} 件の知識を抽出</div>
+      <div className="context-meta">
+        {reextracting === s.id ? "AI が再抽出しています…" : `${s.entryCount} 件の知識を抽出`}
+      </div>
     </div>
   );
 

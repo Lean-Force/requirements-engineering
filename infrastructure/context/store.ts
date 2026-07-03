@@ -170,6 +170,46 @@ export async function addSource(
   return getKnowledgeState(boardId);
 }
 
+/**
+ * 保存済みの原ファイルからドメイン知識を再抽出する
+ * (抽出プロンプトの改善後などに、取り込みをやり直すため)。
+ */
+export async function reextractSource(
+  boardId: string,
+  sourceId: string,
+): Promise<KnowledgeState> {
+  const scope = await scopeOf(boardId, sourceId);
+  const sources = await readSources(scope);
+  const meta = sources.find((s) => s.id === sourceId);
+  if (!meta) throw new Error("指定の資料が見つかりません");
+
+  const buffer = await fs.readFile(
+    path.join(sourceDir(scope, sourceId), meta.fileName),
+  );
+  const parsed = await parseFile(meta.fileName, buffer);
+  const markdown = parsed
+    .map((d) => (d.sheetName ? `## シート: ${d.sheetName}\n\n${d.markdown}` : d.markdown))
+    .join("\n\n");
+
+  const extracted = await extractKnowledge(meta.fileName, markdown);
+  if (extracted.length === 0) {
+    throw new Error(`ドメイン知識を抽出できませんでした: ${meta.fileName}`);
+  }
+
+  // このソース由来のエントリを丸ごと差し替える
+  const entries = (await readEntries(scope)).filter(
+    (e) => e.sourceId !== sourceId,
+  );
+  for (const e of extracted) {
+    entries.push({ id: newId(), sourceId, ...e });
+  }
+  meta.entryCount = extracted.length;
+  await writeJson(sourcesFile(scope), sources);
+  await writeJson(knowledgeFile(scope), entries);
+  await renderSkills(scope);
+  return getKnowledgeState(boardId);
+}
+
 export async function setSourceEnabled(
   boardId: string,
   sourceId: string,

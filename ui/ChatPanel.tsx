@@ -8,10 +8,12 @@ interface Props {
   loading: boolean;
   /** 他のメンバーの AI ターンが進行中(共有ボードのため入力をロックする) */
   remoteBusy?: boolean;
-  /** ボードの 📌 で選択中のストーリー(次の送信の対象として AI に渡る) */
-  selectedStory?: { storyId: string; text: string } | null;
+  /** ボードの 📌 で選択中の付箋(ストーリー / 行動。次の送信の対象として AI に渡る) */
+  selectedTarget?: { kind: "story" | "action"; id: string; text: string } | null;
   onClearSelection?: () => void;
   onSend: (text: string) => void;
+  /** 末尾がエラーのとき、同じ内容で再送する */
+  onRetry?: () => void;
   onClear?: () => void;
 }
 
@@ -19,9 +21,10 @@ export default function ChatPanel({
   messages,
   loading,
   remoteBusy = false,
-  selectedStory = null,
+  selectedTarget = null,
   onClearSelection,
   onSend,
+  onRetry,
   onClear,
 }: Props) {
   const [input, setInput] = useState("");
@@ -76,9 +79,15 @@ export default function ChatPanel({
 
         {messages.map((m, i) => {
           if (m.role === "assistant" && m.content.startsWith("__error__:")) {
+            const isLast = i === messages.length - 1;
             return (
               <div key={i} className="msg error">
                 {m.content.replace("__error__:", "⚠️ ")}
+                {isLast && onRetry && !busy && (
+                  <button className="chat-retry" onClick={onRetry}>
+                    再試行
+                  </button>
+                )}
               </div>
             );
           }
@@ -95,11 +104,13 @@ export default function ChatPanel({
         )}
       </div>
 
-      {selectedStory && (
+      {selectedTarget && (
         <div className="chat-selection">
-          <span className="chat-selection-label">📌 選択中のストーリー</span>
-          <span className="chat-selection-text" title={selectedStory.text}>
-            {selectedStory.text}
+          <span className="chat-selection-label">
+            📌 選択中の{selectedTarget.kind === "story" ? "ストーリー" : "行動"}
+          </span>
+          <span className="chat-selection-text" title={selectedTarget.text}>
+            {selectedTarget.text}
           </span>
           {onClearSelection && (
             <button

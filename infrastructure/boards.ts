@@ -107,3 +107,25 @@ export async function getBoard(id: string): Promise<BoardMeta> {
   if (!board) throw new Error("指定のボードが見つかりません");
   return board;
 }
+
+/** ボード名(業務名)の変更 */
+export async function renameBoard(id: string, name: string): Promise<BoardMeta> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("ボード名を入力してください");
+  const boards = await readBoards();
+  const board = boards.find((b) => b.id === id);
+  if (!board) throw new Error("指定のボードが見つかりません");
+  board.name = trimmed;
+  await writeBoards(boards);
+  return board;
+}
+
+/** ボードの削除(マップ・会話・版履歴・ドメイン知識ごと消す。共通知識は残る) */
+export async function deleteBoard(id: string): Promise<void> {
+  const boards = await readBoards();
+  if (!boards.some((b) => b.id === id)) {
+    throw new Error("指定のボードが見つかりません");
+  }
+  await fs.rm(workspaceDir(id), { recursive: true, force: true });
+  await writeBoards(boards.filter((b) => b.id !== id));
+}

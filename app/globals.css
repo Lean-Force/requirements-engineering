@@ -146,7 +146,7 @@ body,html{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
 .context-viewer-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);font-weight:600;word-break:break-all}
 .context-viewer-body{margin:0;padding:16px;overflow:auto;font-size:12.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--bg)}
 .pick-story{position:absolute;top:3px;left:3px;z-index:2;display:flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:1px solid var(--border);border-radius:50%;background:var(--panel);font-size:10px;line-height:1;cursor:pointer;opacity:0;box-shadow:0 1px 3px rgba(0,0,0,.18);transition:opacity .12s,transform .12s,border-color .12s}
-.story-card:hover .pick-story{opacity:1}
+.story-card:hover .pick-story,.note:hover .pick-story{opacity:1}
 .pick-story:hover{border-color:var(--accent);transform:scale(1.12)}
 .chat-selection{display:flex;align-items:center;gap:8px;margin:0 12px;padding:8px 10px;border:1px solid var(--accent);border-radius:10px;background:var(--accent-soft);font-size:12px}
 .chat-selection-label{flex:0 0 auto;font-weight:600;color:var(--accent)}
@@ -213,9 +213,17 @@ body,html{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
 .board-switcher-backdrop{position:fixed;inset:0;z-index:29}
 .board-switcher-menu{position:absolute;top:calc(100% + 6px);left:0;z-index:30;width:280px;background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 32px rgba(31,36,48,.18);padding:6px;display:flex;flex-direction:column;gap:2px}
 .board-switcher-section{font-size:11px;font-weight:700;color:var(--muted);padding:6px 10px 2px;letter-spacing:.05em}
-.board-switcher-item{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;border:none;border-radius:8px;background:transparent;font-size:13px;color:var(--text);cursor:pointer;text-align:left}
+.board-switcher-item{display:flex;align-items:center;gap:2px;width:100%;border-radius:8px}
 .board-switcher-item:hover{background:var(--accent-soft)}
-.board-switcher-item.active{font-weight:600}
+.board-switcher-item.active .board-switcher-select{font-weight:600}
+.board-switcher-select{display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0;padding:8px 4px 8px 10px;border:none;background:transparent;font-size:13px;color:var(--text);cursor:pointer;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.board-switcher-op{flex:0 0 auto;display:none;align-items:center;justify-content:center;width:22px;height:22px;margin-right:2px;border:none;border-radius:6px;background:transparent;font-size:12px;color:var(--muted);cursor:pointer}
+.board-switcher-item:hover .board-switcher-op{display:flex}
+.board-switcher-op:hover{background:var(--panel);color:var(--accent)}
+.board-switcher-op.danger:hover{color:#b3261e}
+.board-switcher-rename{padding:4px 6px}
+.board-switcher-rename input{width:100%;padding:7px 10px;border:1px solid var(--accent);border-radius:8px;font-size:13px;background:var(--bg)}
+.board-switcher-rename input:focus{outline:none}
 .board-switcher-check{width:14px;flex:0 0 auto;color:var(--accent);font-size:12px}
 .board-switcher-empty{padding:8px 10px;font-size:12px;color:var(--muted)}
 .board-switcher-create{display:flex;gap:6px;padding:8px 6px 4px;border-top:1px solid var(--border);margin-top:4px}
@@ -239,3 +247,9 @@ body,html{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
 .story-card.drop-before{box-shadow:0 -3px 0 0 var(--accent),0 1px 3px rgba(0,0,0,.15)}
 .story-card.drop-after{box-shadow:0 3px 0 0 var(--accent),0 1px 3px rgba(0,0,0,.15)}
 .story-card{-webkit-user-drag:element;user-select:none;-webkit-user-select:none}
+.chat-retry{display:block;margin-top:8px;padding:5px 14px;font-size:12px;border:1px solid var(--accent);border-radius:8px;background:var(--panel);color:var(--accent);cursor:pointer}
+.chat-retry:hover{background:var(--accent);color:#fff}
+.context-item-ops{display:flex;align-items:center;gap:2px;flex:0 0 auto}
+.context-reextract{border:none;background:transparent;font-size:12px;line-height:1;color:var(--muted);cursor:pointer;padding:2px}
+.context-reextract:hover:not(:disabled){color:var(--accent)}
+.context-reextract:disabled{opacity:.5;cursor:progress}

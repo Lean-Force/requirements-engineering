@@ -5,11 +5,18 @@ import { createPortal } from "react-dom";
 import type { StoryMap } from "@/domain";
 import * as domain from "@/domain";
 
+/** 📌 でチャットの対象に選ばれた付箋(ストーリーまたは行動) */
+export interface PickTarget {
+  kind: "story" | "action";
+  id: string;
+  text: string;
+}
+
 interface Props {
   storyMap: StoryMap;
   onChange: (next: StoryMap) => void;
-  /** ストーリーの 📌 で「チャットの対象」に選ぶ(未指定ならボタン非表示) */
-  onPickStory?: (pick: { storyId: string; text: string }) => void;
+  /** 付箋の 📌 で「チャットの対象」に選ぶ(未指定ならボタン非表示) */
+  onPickTarget?: (pick: PickTarget) => void;
 }
 
 // インライン編集状態(ストーリー / 行動 / アクターを単一の状態で扱う)。
@@ -194,7 +201,7 @@ function noteFontSize(text: string): number {
 
 type Activity = StoryMap["activities"][number];
 
-export default function Board({ storyMap, onChange, onPickStory }: Props) {
+export default function Board({ storyMap, onChange, onPickTarget }: Props) {
   const { actors, activities } = storyMap;
 
   // ストーリーの D&D 並び替え(同じ列 = 場面内で上下自由。所属・色は変えない)。
@@ -408,6 +415,18 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
                                 {action.fixed && <span className="story-lock">🔒</span>}
                                 {action.text}
                               </span>
+                              {onPickTarget && (
+                                <button
+                                  className="pick-story"
+                                  title="この行動をチャットの対象にする"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onPickTarget({ kind: "action", id: action.id, text: action.text });
+                                  }}
+                                >
+                                  📌
+                                </button>
+                              )}
                               {!action.fixed && (
                                 <button
                                   className="del-note"
@@ -602,13 +621,13 @@ export default function Board({ storyMap, onChange, onPickStory }: Props) {
                                 {st.fixed && <span className="story-lock">🔒</span>}
                                 {st.text}
                               </span>
-                              {onPickStory && (
+                              {onPickTarget && (
                                 <button
                                   className="pick-story"
                                   title="このストーリーをチャットの対象にする"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    onPickStory({ storyId: st.id, text: st.text });
+                                    onPickTarget({ kind: "story", id: st.id, text: st.text });
                                   }}
                                 >
                                   📌

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import Board from "@/ui/Board";
+import Board, { type PickTarget } from "@/ui/Board";
 import PanZoom from "@/ui/PanZoom";
 import ChatPanel from "@/ui/ChatPanel";
 import HistoryPanel from "@/ui/HistoryPanel";
@@ -43,15 +43,28 @@ export default function BoardPage({ params }: Props) {
   const [showHistory, setShowHistory] = useState(false);
   const [showContexts, setShowContexts] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
-  // ボードの 📌 で選んだストーリー(次のチャット送信の対象として AI に渡す)
-  const [selectedStory, setSelectedStory] = useState<{ storyId: string; text: string } | null>(null);
+  // ボードの 📌 で選んだ付箋(ストーリー / 行動。次のチャット送信の対象として AI に渡す)
+  const [selectedTarget, setSelectedTarget] = useState<PickTarget | null>(null);
 
   // ボード編集の保存はまとめて行う(D&D 連打でリクエストが溢れないよう debounce)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Undo / Redo(⌘Z / ⇧⌘Z)。ボード直接編集のみ対象。AI ターンや他メンバーの
+  // 変更を取り込んだ時点でクリアする(他人の変更まで巻き戻さないため)。
+  const storyMapRef = useRef<StoryMap>(emptyStoryMap());
+  const undoRef = useRef<StoryMap[]>([]);
+  const redoRef = useRef<StoryMap[]>([]);
+  const clearHistory = () => {
+    undoRef.current = [];
+    redoRef.current = [];
+  };
   // SSE 由来の再取得が自分の進行中の操作を上書きしないためのガード
   const loadingRef = useRef(false);
   // ?bootstrap=1 付きで開かれたら、取り込み済み知識から叩き台を自動生成する
   const bootstrapRef = useRef(false);
+
+  useEffect(() => {
+    storyMapRef.current = storyMap;
+  }, [storyMap]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -112,6 +125,7 @@ export default function BoardPage({ params }: Props) {
         setStoryMap(s.storyMap);
         setMessages(s.messages ?? []);
         setVersions(s.versions ?? []);
+        clearHistory();
       })
       .catch(() => {
         /* 失敗時は手元の状態のまま(次のイベントで再試行される) */
@@ -152,21 +166,11 @@ export default function BoardPage({ params }: Props) {
     return () => source.close();
   }, [api, refetchSession]);
 
-  // チャット送信 → AI がマップを更新して返す
-  const sendMessage = useCallback(
-    async (text: string) => {
-      // 📌 選択中のストーリーがあれば、対象として明示した上で送る
-      // (会話履歴にも残るので、チームは「どの付箋への指示だったか」を追える)
-      const content = selectedStory
-        ? `【対象ストーリー】「${selectedStory.text}」(id: ${selectedStory.storyId})\n\n${text}`
-        : text;
-      const userMsg: ChatMessage = { role: "user", content };
-      const nextMessages = [...messages, userMsg];
-      setMessages(nextMessages);
-      setSelectedStory(null);
+  // チャット送信の共通コア(nextMessages の末尾はユーザー発言)
+  const postChat = useCallback(
+    async (nextMessages: ChatMessage[]) => {
       setLoading(true);
       loadingRef.current = true;
-
       try {
         const res = await fetch(`${api}/chat`, {
           method: "POST",
@@ -185,6 +189,7 @@ export default function BoardPage({ params }: Props) {
 
         const { reply, storyMap: updated, versions: nextVersions } = data as ChatResponse;
         setStoryMap(updated);
+        clearHistory(); // AI がマップを更新したので、それ以前へは ⌘Z で戻さない
         setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
         if (nextVersions) setVersions(nextVersions);
       } catch (e) {
@@ -198,8 +203,40 @@ export default function BoardPage({ params }: Props) {
         loadingRef.current = false;
       }
     },
-    [api, messages, storyMap, selectedStory],
+    [api, storyMap],
   );
+
+  // チャット送信 → AI がマップを更新して返す
+  const sendMessage = useCallback(
+    async (text: string) => {
+      // 📌 選択中の付箋があれば、対象として明示した上で送る
+      // (会話履歴にも残るので、チームは「どの付箋への指示だったか」を追える)
+      const content = selectedTarget
+        ? `【対象${selectedTarget.kind === "story" ? "ストーリー" : "行動"}】「${selectedTarget.text}」(id: ${selectedTarget.id})\n\n${text}`
+        : text;
+      const userMsg: ChatMessage = { role: "user", content };
+      const nextMessages = [...messages, userMsg];
+      setMessages(nextMessages);
+      setSelectedTarget(null);
+      await postChat(nextMessages);
+    },
+    [messages, selectedTarget, postChat],
+  );
+
+  // 失敗したターンの再試行: 末尾のエラーメッセージを取り除き、同じ会話で再送する
+  const retryLast = useCallback(() => {
+    const trimmed = [...messages];
+    while (
+      trimmed.length > 0 &&
+      trimmed[trimmed.length - 1].role === "assistant" &&
+      trimmed[trimmed.length - 1].content.startsWith("__error__:")
+    ) {
+      trimmed.pop();
+    }
+    if (trimmed.length === 0 || trimmed[trimmed.length - 1].role !== "user") return;
+    setMessages(trimmed);
+    postChat(trimmed);
+  }, [messages, postChat]);
 
   // 資料つきで作成されたボード: 読み込み完了後に一度だけ叩き台の生成を AI へ依頼する
   useEffect(() => {
@@ -212,8 +249,8 @@ export default function BoardPage({ params }: Props) {
     }
   }, [ready, messages.length, sendMessage]);
 
-  // ボードでの直接編集(D&D・追加・削除)→ debounce して保存
-  const updateStoryMap = useCallback(
+  // マップを反映して debounce 保存する(undo 履歴には触れない)
+  const applyMap = useCallback(
     (next: StoryMap) => {
       setStoryMap(next);
       if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -230,6 +267,44 @@ export default function BoardPage({ params }: Props) {
     },
     [api],
   );
+
+  // ボードでの直接編集(D&D・追加・削除)→ undo 履歴へ積んで保存
+  const updateStoryMap = useCallback(
+    (next: StoryMap) => {
+      undoRef.current.push(storyMapRef.current);
+      if (undoRef.current.length > 50) undoRef.current.shift();
+      redoRef.current = [];
+      applyMap(next);
+    },
+    [applyMap],
+  );
+
+  // ⌘Z / ⇧⌘Z(入力中・モーダル編集中は無効)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)
+      )
+        return;
+      e.preventDefault();
+      if (e.shiftKey) {
+        const next = redoRef.current.pop();
+        if (!next) return;
+        undoRef.current.push(storyMapRef.current);
+        applyMap(next);
+      } else {
+        const prev = undoRef.current.pop();
+        if (!prev) return;
+        redoRef.current.push(storyMapRef.current);
+        applyMap(prev);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [applyMap]);
 
   // 履歴パネルを開くたびに最新の版一覧へ更新(ボード編集も反映される)
   const openHistory = useCallback(() => {
@@ -262,6 +337,7 @@ export default function BoardPage({ params }: Props) {
         if (res.ok) {
           setStoryMap(data.storyMap as StoryMap);
           setVersions(data.versions as StoryMapVersionMeta[]);
+          clearHistory();
         }
       } catch {
         /* 失敗時は何もしない */
@@ -320,6 +396,21 @@ export default function BoardPage({ params }: Props) {
     [api],
   );
 
+  const reextractContext = useCallback(
+    async (id: string): Promise<string | null> => {
+      try {
+        const res = await fetch(`${api}/contexts/${id}/reextract`, { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) return (data.error as string) ?? "再抽出に失敗しました";
+        setKnowledge(data as KnowledgeState);
+        return null;
+      } catch (e) {
+        return e instanceof Error ? e.message : "再抽出に失敗しました";
+      }
+    },
+    [api],
+  );
+
   const deleteContextDoc = useCallback(
     async (id: string) => {
       try {
@@ -346,7 +437,12 @@ export default function BoardPage({ params }: Props) {
       <div className="board-area">
         <header className="app-header">
           <div className="header-title">
-            <BoardSwitcher current={board} />
+            <BoardSwitcher
+              current={board}
+              onCurrentRenamed={(name) =>
+                setBoard((prev) => (prev ? { ...prev, name } : prev))
+              }
+            />
             <span className="sub">
               AI と対話しながら User Story Map を構築・整理
             </span>
@@ -369,7 +465,7 @@ export default function BoardPage({ params }: Props) {
               <Board
                 storyMap={storyMap}
                 onChange={updateStoryMap}
-                onPickStory={setSelectedStory}
+                onPickTarget={setSelectedTarget}
               />
             </PanZoom>
           ) : (
@@ -392,6 +488,7 @@ export default function BoardPage({ params }: Props) {
             onUpload={uploadContexts}
             onToggle={toggleContext}
             onDelete={deleteContextDoc}
+            onReextract={reextractContext}
             onClose={() => setShowContexts(false)}
           />
         )}
@@ -400,9 +497,10 @@ export default function BoardPage({ params }: Props) {
         messages={messages}
         loading={loading}
         remoteBusy={remoteBusy}
-        selectedStory={selectedStory}
-        onClearSelection={() => setSelectedStory(null)}
+        selectedTarget={selectedTarget}
+        onClearSelection={() => setSelectedTarget(null)}
         onSend={sendMessage}
+        onRetry={retryLast}
         onClear={clearChat}
       />
     </div>
