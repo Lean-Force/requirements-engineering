@@ -16,6 +16,7 @@
 //   ANTHROPIC_API_KEY         : (ローカル開発向け)Anthropic API 直結の場合
 //   CLAUDE_LOCAL_AUTH=1       : (ローカル開発向け)このマシンの Claude Code ログインを使う
 //   CHAT_MAX_TURNS            : エージェントループの上限(省略時 24)
+//   USM_FAKE_LLM=1            : (テスト専用)LLM を決定的フェイク(fake.ts)に差し替える
 
 import { promises as fs } from "fs";
 import path from "path";
@@ -43,6 +44,14 @@ import {
   SYSTEM_PROMPT,
 } from "./prompts";
 import {
+  fakeDetectConflicts,
+  fakeExtract,
+  fakeGenerate,
+  fakeRefine,
+  fakeReviseEntry,
+  isFakeLlm,
+} from "./fake";
+import {
   CHAT_OUTPUT_SCHEMA,
   CONFLICT_SCHEMA,
   ENTRY_REVISE_SCHEMA,
@@ -55,7 +64,8 @@ export function isConfigured(): boolean {
   return (
     process.env.CLAUDE_CODE_USE_BEDROCK === "1" ||
     Boolean(process.env.ANTHROPIC_API_KEY) ||
-    process.env.CLAUDE_LOCAL_AUTH === "1"
+    process.env.CLAUDE_LOCAL_AUTH === "1" ||
+    isFakeLlm()
   );
 }
 
@@ -75,6 +85,7 @@ export async function generate(
   conversation: ChatMessage[],
   skillNames: string[],
 ): Promise<Pick<ChatResponse, "reply" | "storyMap" | "usedSkills">> {
+  if (isFakeLlm()) return fakeGenerate(conversation);
   const workspace = workspaceDir(boardId);
   // cwd に指定するため、初回チャット時などまだ無ければ作る(無いと spawn に失敗する)
   await fs.mkdir(workspace, { recursive: true });
@@ -184,6 +195,7 @@ export async function refineCard(
   req: RefineRequest,
   skillNames: string[],
 ): Promise<RefineResponse> {
+  if (isFakeLlm()) return fakeRefine(req);
   const workspace = workspaceDir(boardId);
   await fs.mkdir(workspace, { recursive: true });
 
@@ -246,13 +258,8 @@ export async function refineCard(
 
 // ---- ドメイン知識の抽出 -----------------------------------------------------
 
-export interface ExtractedEntry {
-  category: KnowledgeCategory;
-  title: string;
-  content: string;
-  /** true = 業務横断の共通知識(抽出時に AI が判定) */
-  common: boolean;
-}
+import type { DetectedConflict, ExtractedEntry } from "./types";
+export type { DetectedConflict, ExtractedEntry } from "./types";
 
 /**
  * 資料(Markdown 化済み)からドメイン知識エントリを抽出する(ツールなし 1 ターン)。
@@ -264,6 +271,7 @@ export async function extractKnowledge(
   markdown: string,
   focus?: KnowledgeCategory,
 ): Promise<ExtractedEntry[]> {
+  if (isFakeLlm()) return fakeExtract(markdown);
   // cwd に指定するため、まだ無ければ作る(無いと spawn に失敗する)。
   // 抽出はツールを使わないためスコープに依存しない(データルート直下で実行)。
   await fs.mkdir(dataRoot(), { recursive: true });
@@ -322,6 +330,7 @@ export async function extractKnowledgeMulti(
   fileName: string,
   markdown: string,
 ): Promise<ExtractedEntry[]> {
+  if (isFakeLlm()) return fakeExtract(markdown);
   // 資料をファイルとして置き、subagent に Read させる
   // (オーケストレータの出力トークン経由で全文を配り直すと高コストかつ欠落しやすい)
   const dir = path.join(
@@ -428,6 +437,7 @@ export async function reviseEntry(
   current: { category: KnowledgeCategory; title: string; content: string; common: boolean },
   instruction: string,
 ): Promise<EntryRevision> {
+  if (isFakeLlm()) return fakeReviseEntry(current, instruction);
   await fs.mkdir(dataRoot(), { recursive: true });
   const q = query({
     prompt: `# 原資料: ${fileName}
@@ -480,13 +490,6 @@ ${instruction}`,
 
 // ---- 矛盾検出 ---------------------------------------------------------------
 
-export interface DetectedConflict {
-  topic: string;
-  newClaim: string;
-  existingSource: string;
-  existingClaim: string;
-}
-
 /**
  * 新しく取り込んだ知識と既存知識の実質的な食い違いを検出する(ツールなし 1 ターン)。
  * existingBlocks は「出典ラベル付きの既存知識テキスト」(呼び出し元が組み立てる)。
@@ -496,6 +499,7 @@ export async function detectConflicts(
   newEntriesText: string,
   existingBlocks: string,
 ): Promise<DetectedConflict[]> {
+  if (isFakeLlm()) return fakeDetectConflicts(newEntriesText);
   await fs.mkdir(dataRoot(), { recursive: true });
   const q = query({
     prompt: `# 新しく取り込んだ資料: ${newSourceName}
