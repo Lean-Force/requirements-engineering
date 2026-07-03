@@ -6,11 +6,24 @@ import type { ChatMessage } from "@/contracts";
 interface Props {
   messages: ChatMessage[];
   loading: boolean;
+  /** 他のメンバーの AI ターンが進行中(共有ボードのため入力をロックする) */
+  remoteBusy?: boolean;
+  /** ボードの 📌 で選択中のストーリー(次の送信の対象として AI に渡る) */
+  selectedStory?: { storyId: string; text: string } | null;
+  onClearSelection?: () => void;
   onSend: (text: string) => void;
   onClear?: () => void;
 }
 
-export default function ChatPanel({ messages, loading, onSend, onClear }: Props) {
+export default function ChatPanel({
+  messages,
+  loading,
+  remoteBusy = false,
+  selectedStory = null,
+  onClearSelection,
+  onSend,
+  onClear,
+}: Props) {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -20,9 +33,11 @@ export default function ChatPanel({ messages, loading, onSend, onClear }: Props)
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, loading]);
 
+  const busy = loading || remoteBusy;
+
   const submit = () => {
     const text = input.trim();
-    if (!text || loading) return;
+    if (!text || busy) return;
     onSend(text);
     setInput("");
   };
@@ -75,17 +90,44 @@ export default function ChatPanel({ messages, loading, onSend, onClear }: Props)
         })}
 
         {loading && <div className="typing">AI が整理しています…</div>}
+        {!loading && remoteBusy && (
+          <div className="typing">他のメンバーが AI と整理しています…</div>
+        )}
       </div>
+
+      {selectedStory && (
+        <div className="chat-selection">
+          <span className="chat-selection-label">📌 選択中のストーリー</span>
+          <span className="chat-selection-text" title={selectedStory.text}>
+            {selectedStory.text}
+          </span>
+          {onClearSelection && (
+            <button
+              className="chat-selection-clear"
+              onClick={onClearSelection}
+              aria-label="選択を解除"
+              title="選択を解除"
+            >
+              ×
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="chat-input">
         <textarea
           rows={3}
           value={input}
-          placeholder="要件を入力(⌘/Ctrl + Enter で送信)"
+          placeholder={
+            remoteBusy && !loading
+              ? "他のメンバーの整理が終わるまでお待ちください"
+              : "要件を入力(⌘/Ctrl + Enter で送信)"
+          }
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
+          disabled={remoteBusy && !loading}
         />
-        <button onClick={submit} disabled={loading || !input.trim()}>
+        <button onClick={submit} disabled={busy || !input.trim()}>
           送信
         </button>
       </div>

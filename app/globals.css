@@ -110,3 +110,62 @@ body,html{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
 .history-restore{width:100%;padding:6px 0;font-size:12px;border:1px solid var(--accent);border-radius:8px;background:var(--accent);color:#fff;cursor:pointer}
 .history-restore:hover:not(:disabled){filter:brightness(1.05)}
 .history-restore:disabled{opacity:.5;cursor:not-allowed}
+
+/* ---- ヘッダーのボタン群 -------------------------------------------------- */
+.header-buttons{display:flex;gap:8px;flex:0 0 auto}
+
+/* ---- コンテキスト(参照資料)パネル --------------------------------------- */
+.context-panel{position:absolute;top:0;right:0;bottom:0;width:340px;background:var(--panel);border-left:1px solid var(--border);box-shadow:-8px 0 24px rgba(31,36,48,.08);display:flex;flex-direction:column;z-index:20}
+.context-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);font-weight:600}
+.context-close{border:none;background:transparent;font-size:20px;line-height:1;color:var(--muted);cursor:pointer}
+.context-close:hover{color:var(--text)}
+.context-actions{padding:12px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
+.context-upload{width:100%;padding:8px 0;font-size:13px;border:1px solid var(--accent);border-radius:8px;background:var(--accent);color:#fff;cursor:pointer}
+.context-upload:hover:not(:disabled){filter:brightness(1.05)}
+.context-upload:disabled{opacity:.6;cursor:progress}
+.context-hint{font-size:11px;color:var(--muted);line-height:1.6}
+.context-error{font-size:12px;color:#b3261e;line-height:1.5}
+.context-list{flex:1 1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+.context-empty{color:var(--muted);font-size:13px;line-height:1.7}
+.context-item{border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--bg)}
+.context-item.off{opacity:.55}
+.context-item-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.context-toggle{display:flex;align-items:flex-start;gap:8px;cursor:pointer;min-width:0}
+.context-toggle input{margin-top:3px;accent-color:var(--accent)}
+.context-name{font-size:13px;font-weight:600;line-height:1.5;word-break:break-all}
+.context-delete{border:none;background:transparent;font-size:16px;line-height:1;color:var(--muted);cursor:pointer;flex:0 0 auto}
+.context-delete:hover{color:#b3261e}
+.context-desc{font-size:12px;color:var(--text);line-height:1.6;margin:6px 0 4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.context-meta{font-size:11px;color:var(--muted)}
+.context-open{flex:0 0 auto;padding:6px 12px;font-size:13px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--text);cursor:pointer}
+.context-open:hover{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.context-name{border:none;background:transparent;padding:0;font-size:13px;font-weight:600;line-height:1.5;word-break:break-all;color:var(--text);cursor:pointer;text-align:left}
+.context-name:hover{color:var(--accent);text-decoration:underline}
+.context-viewer-backdrop{position:fixed;inset:0;background:rgba(31,36,48,.45);display:flex;align-items:center;justify-content:center;z-index:40}
+.context-viewer{width:min(760px,90vw);max-height:80vh;background:var(--panel);border-radius:12px;box-shadow:0 16px 48px rgba(31,36,48,.25);display:flex;flex-direction:column;overflow:hidden}
+.context-viewer-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);font-weight:600;word-break:break-all}
+.context-viewer-body{margin:0;padding:16px;overflow:auto;font-size:12.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--bg)}
+.pick-story{position:absolute;top:3px;left:3px;z-index:2;display:flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:1px solid var(--border);border-radius:50%;background:var(--panel);font-size:10px;line-height:1;cursor:pointer;opacity:0;box-shadow:0 1px 3px rgba(0,0,0,.18);transition:opacity .12s,transform .12s,border-color .12s}
+.story-card:hover .pick-story{opacity:1}
+.pick-story:hover{border-color:var(--accent);transform:scale(1.12)}
+.chat-selection{display:flex;align-items:center;gap:8px;margin:0 12px;padding:8px 10px;border:1px solid var(--accent);border-radius:10px;background:var(--accent-soft);font-size:12px}
+.chat-selection-label{flex:0 0 auto;font-weight:600;color:var(--accent)}
+.chat-selection-text{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.chat-selection-clear{flex:0 0 auto;border:none;background:transparent;font-size:15px;line-height:1;color:var(--muted);cursor:pointer}
+.chat-selection-clear:hover{color:var(--text)}
+.story-modal-backdrop{position:fixed;inset:0;background:rgba(31,36,48,.45);display:flex;align-items:center;justify-content:center;z-index:40}
+.story-modal{width:min(480px,90vw);background:var(--panel);border-radius:12px;box-shadow:0 16px 48px rgba(31,36,48,.25);display:flex;flex-direction:column;padding:16px;gap:10px}
+.story-modal-header{display:flex;align-items:center;justify-content:space-between;font-weight:600}
+.story-modal-close{border:none;background:transparent;font-size:20px;line-height:1;color:var(--muted);cursor:pointer}
+.story-modal-close:hover{color:var(--text)}
+.story-modal-input{width:100%;border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;line-height:1.6;resize:vertical;font-family:inherit}
+.story-modal-input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.story-modal-hint{font-size:11px;color:var(--muted);line-height:1.5}
+.story-modal-actions{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.story-modal-actions-right{display:flex;gap:8px}
+.story-modal-cancel{padding:6px 14px;font-size:13px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--text);cursor:pointer}
+.story-modal-cancel:hover{border-color:var(--muted)}
+.story-modal-save{padding:6px 18px;font-size:13px;border:1px solid var(--accent);border-radius:8px;background:var(--accent);color:#fff;cursor:pointer}
+.story-modal-save:hover{filter:brightness(1.05)}
+.story-modal-delete{padding:6px 14px;font-size:13px;border:1px solid #e5b9b5;border-radius:8px;background:var(--panel);color:#b3261e;cursor:pointer}
+.story-modal-delete:hover{background:#fdeceb;border-color:#b3261e}

@@ -1,12 +1,15 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { StoryMap } from "@/domain";
 import * as domain from "@/domain";
 
 interface Props {
   storyMap: StoryMap;
   onChange: (next: StoryMap) => void;
+  /** ストーリーの 📌 で「チャットの対象」に選ぶ(未指定ならボタン非表示) */
+  onPickStory?: (pick: { storyId: string; text: string }) => void;
 }
 
 // インライン編集状態(ストーリー / 行動 / アクターを単一の状態で扱う)。
@@ -72,6 +75,70 @@ function InlineInput({
   return multiline ? <textarea {...common} /> : <input {...common} />;
 }
 
+// ストーリー編集モーダル。Cmd/Ctrl+Enter 保存 / Esc 取消。空で保存すると削除。
+// PanZoom の transform の影響を受けないよう body へポータルで出す。
+function StoryEditModal({
+  initial,
+  color,
+  onCommit,
+  onCancel,
+}: {
+  initial: string;
+  color: { bg: string; border: string };
+  onCommit: (text: string) => void;
+  onCancel: () => void;
+}) {
+  const [text, setText] = useState(initial);
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      onCommit(text);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      onCancel();
+    }
+  };
+  return createPortal(
+    <div className="story-modal-backdrop" onClick={onCancel}>
+      <div className="story-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="story-modal-header">
+          <span>ストーリーを編集</span>
+          <button className="story-modal-close" onClick={onCancel} aria-label="閉じる">
+            ×
+          </button>
+        </div>
+        <textarea
+          className="story-modal-input"
+          style={{ background: color.bg, borderColor: color.border }}
+          autoFocus
+          rows={5}
+          value={text}
+          placeholder="ストーリー(例: 店員は…したい。なぜなら…だからだ。)"
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+        />
+        <div className="story-modal-hint">
+          「(アクター)は〜したい。なぜなら〜だからだ。」の形を推奨。⌘/Ctrl + Enter で保存
+        </div>
+        <div className="story-modal-actions">
+          <button className="story-modal-delete" onClick={() => onCommit("")}>
+            削除
+          </button>
+          <div className="story-modal-actions-right">
+            <button className="story-modal-cancel" onClick={onCancel}>
+              キャンセル
+            </button>
+            <button className="story-modal-save" onClick={() => onCommit(text)}>
+              保存
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 // アクターごとの色(付箋色)。
 const ACTOR_COLORS = [
   { bg: "#f2c94c", border: "#d4ab2c" },
@@ -97,7 +164,7 @@ function noteFontSize(text: string): number {
 
 type Activity = StoryMap["activities"][number];
 
-export default function Board({ storyMap, onChange }: Props) {
+export default function Board({ storyMap, onChange, onPickStory }: Props) {
   const { actors, activities } = storyMap;
   const [editor, setEditor] = useState<Editor | null>(null);
 
@@ -383,19 +450,7 @@ export default function Board({ storyMap, onChange }: Props) {
                       {/* 上: ストーリーカードを列の先頭から詰めて縦積み。編集中は textarea に差し替え */}
                       {activity.actions.map((action) => {
                         const c = colorOf(action.actorId);
-                        return action.stories.map((st) =>
-                          editor?.mode === "story-edit" && editor.storyId === st.id ? (
-                            <InlineInput
-                              multiline
-                              key={st.id}
-                              className="story-input"
-                              color={c}
-                              initial={editor.initial}
-                              placeholder="ストーリー(空にすると削除)"
-                              onCommit={(t) => commitEditStory(activity.id, action.id, st.id, t)}
-                              onCancel={() => setEditor(null)}
-                            />
-                          ) : (
+                        return action.stories.map((st) => (
                             <div
                               key={st.id}
                               className="story-card clickable"
@@ -415,6 +470,18 @@ export default function Board({ storyMap, onChange }: Props) {
                               <span style={{ fontSize: noteFontSize(st.text) }}>
                                 {st.text}
                               </span>
+                              {onPickStory && (
+                                <button
+                                  className="pick-story"
+                                  title="このストーリーをチャットの対象にする"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onPickStory({ storyId: st.id, text: st.text });
+                                  }}
+                                >
+                                  📌
+                                </button>
+                              )}
                               <button
                                 className="del-story"
                                 title="このストーリーを削除"
@@ -492,6 +559,24 @@ export default function Board({ storyMap, onChange }: Props) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ストーリー編集モーダル(body へポータル) */}
+      {editor?.mode === "story-edit" && (
+        <StoryEditModal
+          key={editor.storyId}
+          initial={editor.initial}
+          color={(() => {
+            const activity = activities.find((a) => a.id === editor.activityId);
+            return activity
+              ? actorColorByAction(activity, editor.actionId)
+              : ACTOR_COLORS[0];
+          })()}
+          onCommit={(t) =>
+            commitEditStory(editor.activityId, editor.actionId, editor.storyId, t)
+          }
+          onCancel={() => setEditor(null)}
+        />
       )}
     </div>
   );

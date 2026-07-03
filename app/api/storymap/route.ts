@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { loadStoryMap, saveStoryMap } from "@/infrastructure/storage";
+import { emit } from "@/infrastructure/events";
 import { normalizeStoryMap } from "@/domain";
 import type { StoryMap } from "@/domain";
 
@@ -30,5 +31,7 @@ export async function PUT(request: Request) {
   const normalized = normalizeStoryMap(map);
   // 連続するボード編集は版履歴上で 1 つに畳み込まれる(storage 側の方針)
   await saveStoryMap(normalized, "edit", "ボードを編集");
+  // 他のメンバーの画面へ反映を促す(薄い通知 → クライアントが再取得)
+  emit("storymap");
   return NextResponse.json(normalized);
 }

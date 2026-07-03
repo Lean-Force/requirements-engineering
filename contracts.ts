@@ -42,3 +42,27 @@ export interface ChatResponse {
   storyMap: StoryMap;
   versions?: StoryMapVersionMeta[];
 }
+
+/**
+ * アップロードされた参照資料(コンテキスト)1 件のメタ情報。
+ * 1 ファイル = 1 件。実体は Agent Skill(SKILL.md)としてワークスペースに
+ * 保存され、AI が必要と判断したときだけ本文を読む(progressive disclosure)。
+ * Excel の複数シートは SKILL.md 内のセクションとして保持される。
+ */
+export interface ContextDocMeta {
+  /** skill 名を兼ねる(ディレクトリ名 = SKILL.md の name) */
+  id: string;
+  fileName: string;
+  /** AI に常駐提示される 1 行説明 */
+  description: string;
+  /** プロンプトに含めるか(チーム共有の状態) */
+  enabled: boolean;
+  charCount: number;
+  uploadedAt: string;
+}
+
+/** サーバーから push されるボード同期イベント(SSE) */
+export interface BoardEvent {
+  type: "storymap" | "chat:start" | "chat:end" | "contexts";
+  at: string;
+}

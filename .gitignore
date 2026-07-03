@@ -39,6 +39,9 @@ next-env.d.ts
 # 探索テスト用の隔離データ
 /data/explore-storymap.json
 
+# コンテキスト(参照資料)のワークスペース(アップロードされた資料の実体)
+/data/workspace/
+
 # 作業用バックアップ・スクラッチ
 /.ui-backup-panzoom/
 /e2e-explore-tmp.ts

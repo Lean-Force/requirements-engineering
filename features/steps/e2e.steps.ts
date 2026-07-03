@@ -131,10 +131,11 @@ When(
 When(
   "ストーリー {string} をクリックして {string} に変更する",
   async function (this: UsmWorld, oldText: string, newText: string) {
+    // クリックで編集モーダルが開く(インライン編集から変更)
     await this.page.locator(".story-card", { hasText: oldText }).click();
-    const input = this.page.locator(".story-input");
+    const input = this.page.locator(".story-modal-input");
     await input.fill(newText);
-    await withSave(this, () => input.press("Enter"));
+    await withSave(this, () => this.page.locator(".story-modal-save").click());
     await expect(this.page.locator(".story-card", { hasText: newText })).toBeVisible();
   },
 );
