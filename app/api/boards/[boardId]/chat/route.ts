@@ -64,21 +64,10 @@ export async function POST(request: Request, { params }: Params) {
       // ミューテックス通過後に読み直す(直前のターンの結果を正とする)
       const currentMap = await loadStoryMap(boardId);
 
-      // 最後のユーザーメッセージに現在のマップ(JSON)を文脈として付与する
-      const conversation: ChatMessage[] = messages.map((m) => ({ ...m }));
-      const last = conversation[conversation.length - 1];
-      conversation[conversation.length - 1] = {
-        role: last.role,
-        content: `${last.content}
-
----
-現在の User Story Map(この内容をベースに更新してください):
-${JSON.stringify(currentMap)}`,
-      };
-
-      // このボードの知識 + 共通知識 + 各業務の確定マップを system prompt へ全文注入する
+      // 知識 + 共通知識 + 確定マップ + 現在のマップを system prompt へ全文注入する
+      // (会話メッセージはユーザーの発話のまま手を加えない)
       const knowledgeContext = await buildKnowledgeContext(boardId);
-      const parsed = await generate(boardId, conversation, knowledgeContext);
+      const parsed = await generate(boardId, messages, knowledgeContext, currentMap);
 
       // AI 出力を保存してよい形へ整える(正規化・確定要素の保護・表示順の引き継ぎ)。
       // 手順の順序は domain.applyAiUpdate に閉じている。

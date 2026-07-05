@@ -32,17 +32,14 @@ const line = (text: string, prefix: string): string | undefined =>
 
 export function fakeGenerate(
   conversation: ChatMessage[],
+  currentMap: StoryMap,
 ): { reply: string; storyMap: StoryMap } {
   const text = conversation.map((m) => m.content).join("\n");
   const mapJson = line(text, "FAKEMAP:");
-  let storyMap: StoryMap = { actors: [], activities: [] };
-  if (mapJson) {
-    storyMap = JSON.parse(mapJson) as StoryMap;
-  } else {
-    // ディレクティブが無ければ「現在のマップ」(会話末尾に添付される JSON)をそのまま返す
-    const current = /現在の User Story Map[^\n]*:\n(\{.*\})/s.exec(text)?.[1];
-    if (current) storyMap = JSON.parse(current) as StoryMap;
-  }
+  // ディレクティブが無ければ「現在のマップ」をそのまま返す(無変更ターン)
+  const storyMap: StoryMap = mapJson
+    ? (JSON.parse(mapJson) as StoryMap)
+    : currentMap;
   return {
     reply: line(text, "FAKEREPLY:") ?? "(fake) マップを更新しました",
     storyMap,

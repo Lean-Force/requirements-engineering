@@ -81,15 +81,16 @@ function renderConversation(conversation: ChatMessage[]): string {
 
 /**
  * 会話履歴から「返信 + 更新後マップ」を生成する。
- * knowledgeContext は buildKnowledgeContext の結果(知識 + 共通 + 確定マップの全文)。
- * system prompt へ注入するので、AI は選択的に読むのではなく常に全体が見える。
+ * knowledgeContext(知識 + 共通 + 確定マップ)と currentMap(現在のマップ)を
+ * system prompt へ注入する。AI は選択的に読むのではなく常に全体が見える。
  */
 export async function generate(
   boardId: string,
   conversation: ChatMessage[],
   knowledgeContext: string,
+  currentMap: StoryMap,
 ): Promise<Pick<ChatResponse, "reply" | "storyMap">> {
-  if (isFakeLlm()) return fakeGenerate(conversation);
+  if (isFakeLlm()) return fakeGenerate(conversation, currentMap);
   const workspace = workspaceDir(boardId);
   // cwd に指定するため、初回チャット時などまだ無ければ作る(無いと spawn に失敗する)
   await fs.mkdir(workspace, { recursive: true });
@@ -100,11 +101,17 @@ export async function generate(
     options: {
       model: process.env.ANTHROPIC_MODEL || undefined,
       cwd: workspace,
-      // 参照情報(不変)を先、ルールを含めて 1 本の system prompt に。
-      // 知識部分はターン間で不変なのでプロンプトキャッシュが効く
-      systemPrompt: knowledgeContext
-        ? `${SYSTEM_PROMPT}\n\n---\n\n以下は参照情報(ドメイン知識・共通知識・各業務の合意済みマップ)。\n\n${knowledgeContext}`
-        : SYSTEM_PROMPT,
+      // ルール → 参照情報(不変) → 現在のマップ(毎ターン変わるので末尾)の順で
+      // 1 本の system prompt にする
+      systemPrompt: [
+        SYSTEM_PROMPT,
+        knowledgeContext
+          ? `---\n\n以下は参照情報(ドメイン知識・共通知識・各業務の合意済みマップ)。\n\n${knowledgeContext}`
+          : null,
+        `---\n\n# 現在の User Story Map(この内容をベースに更新後の全体を返す)\n\n${JSON.stringify(currentMap)}`,
+      ]
+        .filter((x): x is string => x !== null)
+        .join("\n\n"),
       settingSources: [],
       // ボード操作のカスタムツール(チャットからのボード作成)のみ許可
       mcpServers: { usm: boardToolsServer() },

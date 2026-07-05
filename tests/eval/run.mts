@@ -360,13 +360,9 @@ async function main() {
     const started = Date.now();
     const res = await generate(
       c.boardId,
-      [
-        {
-          role: "user",
-          content: `${c.message}\n\n---\n現在の User Story Map(この内容をベースに更新してください):\n${JSON.stringify(c.map ?? { actors: [], activities: [] })}`,
-        },
-      ],
+      [{ role: "user", content: c.message }],
       knowledgeContext,
+      (c.map ?? { actors: [], activities: [] }) as never,
     );
     const mapJson = JSON.stringify(res.storyMap);
 
