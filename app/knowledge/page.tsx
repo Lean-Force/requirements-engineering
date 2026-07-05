@@ -9,10 +9,17 @@ import Link from "next/link";
 import type { KnowledgeState, SourceMeta } from "@/contracts";
 import { useRouter } from "next/navigation";
 import ConflictList from "@/ui/ConflictList";
+import ContextSizeMeter from "@/ui/ContextSizeMeter";
 import ProposalList from "@/ui/ProposalList";
 import SourceEntriesViewer from "@/ui/SourceEntriesViewer";
 
-const EMPTY: KnowledgeState = { sources: [], categories: [], conflicts: [], proposals: [] };
+const EMPTY: KnowledgeState = {
+  sources: [],
+  categories: [],
+  conflicts: [],
+  proposals: [],
+  contextSize: { chars: 0, tokens: 0, windowTokens: 200_000 },
+};
 
 interface Viewer {
   title: string;
@@ -185,6 +192,7 @@ export default function KnowledgeAdminPage() {
       </header>
 
       {error && <div className="board-list-error">⚠️ {error}</div>}
+      <ContextSizeMeter size={knowledge.contextSize} />
 
       <div className="context-list knowledge-admin-list">
         <div className="context-section-title">知識カテゴリ({totalEntries})</div>

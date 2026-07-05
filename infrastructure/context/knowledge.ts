@@ -21,6 +21,7 @@ import path from "path";
 import type {
   BoardMeta,
   BoardProposal,
+  ContextSize,
   EntryPatch,
   EntryRevision,
   KnowledgeCategory,
@@ -112,13 +113,37 @@ async function view(boardId: string | null): Promise<{
 export async function getKnowledgeState(
   boardId: string | null,
 ): Promise<KnowledgeState> {
-  const [sources, conflicts, proposals, { labelOf, entries }] = await Promise.all([
-    readSources(ownerScope(boardId)),
-    readConflicts(ownerScope(boardId)),
-    readProposals(ownerScope(boardId)),
-    view(boardId),
-  ]);
-  return { sources, categories: summarize(labelOf, entries), conflicts, proposals };
+  const [sources, conflicts, proposals, { labelOf, entries }, block] =
+    await Promise.all([
+      readSources(ownerScope(boardId)),
+      readConflicts(ownerScope(boardId)),
+      readProposals(ownerScope(boardId)),
+      view(boardId),
+      buildBoardContext(boardId),
+    ]);
+  return {
+    sources,
+    categories: summarize(labelOf, entries),
+    conflicts,
+    proposals,
+    contextSize: measureContext(block),
+  };
+}
+
+/**
+ * 注入テキストのサイズを見積もる。トークンは ASCII 4 文字 ≈ 1、
+ * それ以外(日本語等)1 文字 ≈ 1 の概算(監視用途には十分)。
+ * 上限は CONTEXT_WINDOW_TOKENS(既定 200,000 = Claude の標準)で標準化する。
+ */
+function measureContext(block: string): ContextSize {
+  let ascii = 0;
+  for (const ch of block) if (ch.charCodeAt(0) < 128) ascii++;
+  const nonAscii = [...block].length - ascii;
+  return {
+    chars: [...block].length,
+    tokens: Math.ceil(ascii / 4) + nonAscii,
+    windowTokens: Number(process.env.CONTEXT_WINDOW_TOKENS || 200_000),
+  };
 }
 
 // ---- 取り込み・再抽出 -------------------------------------------------------

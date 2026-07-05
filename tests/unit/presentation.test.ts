@@ -265,4 +265,22 @@ describe("更新が注入内容へ反映される(鮮度)", () => {
     expect(block).not.toContain("Aの用語"); // ボード由来の共通知識も消える
     expect(block).not.toContain("## 業務: 業務A"); // 確定マップ断片も掃除される
   });
+
+  it("contextSize が注入サイズを追従する(追加で増え、削除で減る)", async () => {
+    const { getKnowledgeState, deleteSource } = await import("@/infrastructure/context");
+    const empty = await getKnowledgeState(A);
+    expect(empty.contextSize.windowTokens).toBe(200_000);
+    const before = empty.contextSize.tokens;
+
+    const state = await addSource(
+      A,
+      "設計.txt",
+      Buffer.from("KB|flows|承認ルール|1,000万円を超える送金は部長承認が必要|false"),
+    );
+    expect(state.contextSize.tokens).toBeGreaterThan(before);
+    expect(state.contextSize.chars).toBeGreaterThan(0);
+
+    const after = await deleteSource(A, state.sources[0].id);
+    expect(after.contextSize.tokens).toBeLessThan(state.contextSize.tokens);
+  });
 });

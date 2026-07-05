@@ -24,7 +24,13 @@ import type {
   StoryMapVersionMeta,
 } from "@/contracts";
 
-const EMPTY_KNOWLEDGE: KnowledgeState = { sources: [], categories: [], conflicts: [], proposals: [] };
+const EMPTY_KNOWLEDGE: KnowledgeState = {
+  sources: [],
+  categories: [],
+  conflicts: [],
+  proposals: [],
+  contextSize: { chars: 0, tokens: 0, windowTokens: 200_000 },
+};
 
 interface Props {
   params: { boardId: string };

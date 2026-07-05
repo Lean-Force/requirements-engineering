@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import type { KnowledgeState, SourceMeta } from "@/contracts";
 import ConflictList from "./ConflictList";
+import ContextSizeMeter from "./ContextSizeMeter";
 import ProposalList from "./ProposalList";
 import SourceEntriesViewer, { type EntriesApi } from "./SourceEntriesViewer";
 
@@ -173,6 +174,7 @@ export default function ContextPanel({
           矛盾があれば検出して表示します。
         </div>
         {error && <div className="context-error">⚠️ {error}</div>}
+        <ContextSizeMeter size={knowledge.contextSize} />
       </div>
 
       <div className="context-list">

@@ -154,10 +154,22 @@ export interface BoardProposal {
   reason: string;
 }
 
+/** AI へ注入される標準コンテキストのサイズ(モデル上限に対する監視用) */
+export interface ContextSize {
+  /** 注入テキストの文字数 */
+  chars: number;
+  /** 概算トークン数(ASCII 4文字 ≈ 1、それ以外 1文字 ≈ 1 で見積り) */
+  tokens: number;
+  /** モデルのコンテキスト上限(CONTEXT_WINDOW_TOKENS、既定 200,000) */
+  windowTokens: number;
+}
+
 /** /api/contexts 系のレスポンス(知識ベースの全体像) */
 export interface KnowledgeState {
   sources: SourceMeta[];
   categories: KnowledgeCategorySummary[];
+  /** AI へ注入される標準コンテキストのサイズ */
+  contextSize: ContextSize;
   /** 未解消の矛盾(このビューの所有スコープ分) */
   conflicts: KnowledgeConflict[];
   /** 未処理のボード作成提案(このビューの所有スコープ分) */
