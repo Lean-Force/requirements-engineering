@@ -1,7 +1,7 @@
 // ドメイン知識ベースのユースケース。
 //
-// アップロードされたファイルは「ソース(原資料)」としてアップロードした場所
-// (ボード or 共通管理画面 = _common)に保存され、LLM が固定カテゴリの
+// アップロードされたファイルは「ソース(原資料)」として取り込んだボードに保存され、
+// LLM が固定カテゴリの
 // ドメイン知識エントリへ抽出・分解する(agent.extractKnowledge)。
 // その際、各エントリが業務固有か業務横断(common)かを AI が自動判定する。
 // ユーザーはアップロード時にスコープを意識しない。
@@ -61,7 +61,9 @@ import { COMMON_SCOPE, workspaceDir } from "./workspace";
 //
 // ビューは 2 種類:
 //   boardId = 文字列 … そのボードの資料 + AI から見える知識(業務固有 + 全共通)
-//   boardId = null   … 共通管理画面(_common の資料 + 全スコープの共通知識)
+//   boardId = null   … 共通ビュー(/knowledge。全スコープの共通知識 + 過去の共通資料)。
+//                       アップロード口はボードのみで、null での addSource は
+//                       旧データ互換・テスト用(UI/API からは到達しない)
 
 /** ビューを所有スコープへ解決する */
 const ownerScope = (boardId: string | null): string => boardId ?? COMMON_SCOPE;
@@ -124,7 +126,7 @@ async function toMarkdown(fileName: string, buffer: Buffer): Promise<string> {
 /**
  * ファイル 1 つをソースとして取り込む:
  * 原資料の保存 → Markdown 化 → LLM でドメイン知識を抽出 → skill を再レンダリング。
- * 各エントリの業務固有/業務横断は AI が判定する(共通管理画面からの追加は常に共通)。
+ * 各エントリの業務固有/業務横断は AI が判定する(boardId = null は互換経路で常に共通)。
  */
 export async function addSource(
   boardId: string | null,
@@ -176,7 +178,7 @@ export async function addSource(
     id: newId(),
     sourceId: id,
     ...e,
-    // 共通管理画面からの追加は業務が無いため必ず共通知識になる
+    // 共通スコープ(互換経路)への追加は業務が無いため必ず共通知識になる
     common: boardId === null ? true : e.common,
   }));
   entries.push(...added);
@@ -387,7 +389,7 @@ async function scanNewBusiness(
     const boards = await listBoards();
     const intake =
       boardId === null
-        ? "共通知識の管理画面(特定の業務に紐づかない)"
+        ? "共通スコープ(特定の業務に紐づかない)"
         : `業務「${boards.find((b) => b.id === boardId)?.name ?? boardId}」のボード`;
     const detected = await detectNewBusiness(
       fileName,
@@ -534,7 +536,7 @@ export async function updateEntry(
   if (!entry) throw new Error("指定のエントリが見つかりません");
   entry.title = patch.title;
   entry.content = patch.content;
-  // 共通管理画面のエントリは常に共通のまま
+  // 共通スコープのエントリは常に共通のまま
   entry.common = boardId === null ? true : patch.common;
   entry.edited = true;
   await writeJson(knowledgeFile(scope), entries);
