@@ -118,7 +118,7 @@ describe("チャットターンの全配線(POST /chat)", () => {
     const res = await chatPost(
       json("POST", {
         messages: [
-          { role: "user", content: `直して\nFAKEMAP:${JSON.stringify(tampered)}\nFAKESKILLS:kb-flows` },
+          { role: "user", content: `直して\nFAKEMAP:${JSON.stringify(tampered)}` },
         ],
         storyMap: FIXED_MAP,
       }),
@@ -138,11 +138,10 @@ describe("チャットターンの全配線(POST /chat)", () => {
     // 版が chat として積まれる
     expect(body.versions?.some((v) => v.source === "chat")).toBe(true);
 
-    // 会話が永続化され、assistant メッセージに usedSkills が残る
+    // 会話が永続化されている
     const session = (await (await sessionGet(json("GET"), params())).json()) as SessionState;
     const last = session.messages[session.messages.length - 1];
     expect(last.role).toBe("assistant");
-    expect(last.usedSkills).toEqual(["kb-flows"]);
   });
 
   it("同じボードへの並行ターンは直列化され、両方の版が壊れず残る", async () => {
@@ -243,15 +242,7 @@ describe("知識ベースの全配線(contexts / entries / conflicts / knowledge
     expect(state.sources).toHaveLength(1);
     expect(state.categories.find((c) => c.category === "flows")?.count).toBe(1);
 
-    // skill がディスクに描画されている(業務固有 + 共通)
-    await expect(
-      fs.access(path.join(tmp, "workspaces", BOARD, ".claude", "skills", "kb-flows", "SKILL.md")),
-    ).resolves.toBeUndefined();
-    await expect(
-      fs.access(path.join(tmp, "workspaces", "_common", ".claude", "skills", "kb-common-terms", "SKILL.md")),
-    ).resolves.toBeUndefined();
-
-    // 共通管理ビュー(GET /api/knowledge)に集約される
+    // 共通ビュー(GET /api/knowledge)に集約される
     const admin = (await (await knowledgeGet()).json()) as KnowledgeState;
     expect(admin.categories.find((c) => c.category === "terms")?.count).toBe(1);
   });
@@ -285,13 +276,6 @@ describe("知識ベースの全配線(contexts / entries / conflicts / knowledge
       await entriesGet(json("GET"), params({ id: sourceId }))
     ).json()) as { entries: { edited?: boolean; content: string }[] };
     expect(after.entries[0].edited).toBe(true);
-
-    // skill にも反映されている
-    const skill = await fs.readFile(
-      path.join(tmp, "workspaces", BOARD, ".claude", "skills", "kb-flows", "SKILL.md"),
-      "utf-8",
-    );
-    expect(skill).toContain("2億円超は役員承認");
 
     // 削除
     const del = await entryDelete(json("DELETE"), params({ id: sourceId, entryId }));
@@ -354,23 +338,19 @@ describe("付箋の AI 校正(POST /refine)", () => {
 });
 
 describe("ボード管理ルート", () => {
-  it("名前変更 → kb-common-maps の見出しに追従、削除でワークスペースが消える", async () => {
-    // 確定要素を保存して共通マップを作る
+  it("名前変更が通り、削除でワークスペースと確定マップ断片が消える", async () => {
+    // 確定要素を保存して確定マップ断片を作る
     await storymapPut(json("PUT", FIXED_MAP), params());
-    const commonMaps = path.join(
-      tmp, "workspaces", "_common", ".claude", "skills", "kb-common-maps", "SKILL.md",
-    );
-    expect(await fs.readFile(commonMaps, "utf-8")).toContain("統合テスト業務");
+    const snippet = path.join(tmp, "workspaces", "_common", "map-snippets", `${BOARD}.md`);
+    await expect(fs.access(snippet)).resolves.toBeUndefined();
 
     const rename = await boardPatch(json("PATCH", { name: "改名後の業務" }), params());
     expect(rename.status).toBe(200);
-    expect(await fs.readFile(commonMaps, "utf-8")).toContain("改名後の業務");
 
     const del = await boardDelete(json("DELETE"), params());
     expect(del.status).toBe(200);
     await expect(fs.access(path.join(tmp, "workspaces", BOARD))).rejects.toThrow();
-    // このボード由来の確定マップも共通から消える
-    await expect(fs.access(commonMaps)).rejects.toThrow();
+    await expect(fs.access(snippet)).rejects.toThrow();
   });
 });
 

@@ -128,11 +128,6 @@ export default function ChatPanel({
           return (
             <div key={i} className={`msg ${m.role}`}>
               {m.content}
-              {m.role === "assistant" && (m.usedSkills?.length ?? 0) > 0 && (
-                <div className="msg-used-skills" title="AI がこの返信で参照したドメイン知識">
-                  📖 参照: {m.usedSkills!.map(skillLabel).join("・")}
-                </div>
-              )}
             </div>
           );
         })}

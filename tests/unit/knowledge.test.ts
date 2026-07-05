@@ -13,6 +13,7 @@ import { createBoard } from "@/infrastructure/boards";
 import {
   acceptBoardProposal,
   addSource,
+  buildKnowledgeContext,
   deleteEntry,
   deleteSource,
   dismissBoardProposal,
@@ -21,10 +22,8 @@ import {
   getKnowledgeState,
   getSourceEntries,
   getSourceMarkdown,
-  prepareSkillsForChat,
   proposeEntryRevision,
   reextractSource,
-  renderCommonSkills,
   setSourceEnabled,
   updateEntry,
 } from "@/infrastructure/context";
@@ -56,8 +55,6 @@ const DOC_MIXED = [
   "KB|terms|BSAD|基本設計書の略称|true",
 ].join("\n");
 
-const skillPath = (scope: string, name: string) =>
-  path.join(tmp, "workspaces", scope, ".claude", "skills", name, "SKILL.md");
 const originalPath = (scope: string, id: string, fileName: string) =>
   path.join(tmp, "workspaces", scope, "sources", id, fileName);
 
@@ -74,55 +71,48 @@ describe("知識ベース", () => {
       fs.readFile(originalPath(BOARD, state.sources[0].id, "memo.txt"), "utf-8"),
     ).resolves.toBe(DOC_A);
 
-    // skill がレンダリングされ、description にタイトルが入る
-    const skill = await fs.readFile(skillPath(BOARD, "kb-flows"), "utf-8");
-    expect(skill).toContain("name: kb-flows");
-    expect(skill).toContain("承認ルール");
-    expect(skill).toContain("_出典: memo.txt_");
+    // 注入内容(system prompt 用テキスト)に出典付きで載る
+    const context = await buildKnowledgeContext(BOARD);
+    expect(context).toContain("# この業務のドメイン知識");
+    expect(context).toContain("承認ルール");
+    expect(context).toContain("_出典: memo.txt_");
   });
 
-  it("AI が common と判定したエントリは kb-common-* へ、それ以外は kb-* へ入る", async () => {
+  it("AI が common と判定したエントリは共通セクションへ、それ以外は業務セクションへ入る", async () => {
     await addSource(BOARD, "設計書.txt", Buffer.from(DOC_MIXED));
 
-    // 業務固有 → ボードの kb-flows(kb-terms は作られない)
-    await expect(fs.access(skillPath(BOARD, "kb-flows"))).resolves.toBeUndefined();
-    await expect(fs.access(skillPath(BOARD, "kb-terms"))).rejects.toThrow();
-
-    // 共通 → _common の kb-common-terms に合成され、チャット準備で提示される
-    const common = await fs.readFile(skillPath("_common", "kb-common-terms"), "utf-8");
+    const context = await buildKnowledgeContext(BOARD);
+    const own = context.split("# 業務横断の共通知識")[0];
+    const common = context.split("# 業務横断の共通知識")[1] ?? "";
+    expect(own).toContain("承認ルール");
     expect(common).toContain("BSAD");
-    expect(await prepareSkillsForChat(BOARD)).toEqual(
-      expect.arrayContaining(["kb-flows", "kb-common-terms"]),
-    );
 
-    // 別ボードのチャット準備でも共通知識だけが同期される
+    // 別ボードの注入内容には共通知識だけが現れる
     const other = (await createBoard("別業務")).id;
-    expect(await prepareSkillsForChat(other)).toEqual(["kb-common-terms"]);
-    await expect(fs.access(skillPath(other, "kb-common-terms"))).resolves.toBeUndefined();
+    const otherContext = await buildKnowledgeContext(other);
+    expect(otherContext).toContain("BSAD");
+    expect(otherContext).not.toContain("承認ルール");
   });
 
-  it("setSourceEnabled(false) で業務固有・共通の両 skill から消え、戻すと再生される", async () => {
+  it("setSourceEnabled(false) で業務固有・共通とも注入から消え、戻すと再生される", async () => {
     const state = await addSource(BOARD, "memo.txt", Buffer.from(DOC_MIXED));
     const id = state.sources[0].id;
 
     await setSourceEnabled(BOARD, id, false);
-    await expect(fs.access(skillPath(BOARD, "kb-flows"))).rejects.toThrow();
-    await expect(fs.access(skillPath("_common", "kb-common-terms"))).rejects.toThrow();
-    expect(await prepareSkillsForChat(BOARD)).toEqual([]);
+    expect(await buildKnowledgeContext(BOARD)).toBe("");
 
     await setSourceEnabled(BOARD, id, true);
-    expect(await prepareSkillsForChat(BOARD)).toEqual(
-      expect.arrayContaining(["kb-flows", "kb-common-terms"]),
-    );
+    const context = await buildKnowledgeContext(BOARD);
+    expect(context).toContain("承認ルール");
+    expect(context).toContain("BSAD");
   });
 
-  it("deleteSource でエントリ・skill・原ファイルが消える(共通へ振り分けた分も)", async () => {
+  it("deleteSource でエントリと注入内容が消える(共通へ振り分けた分も)", async () => {
     const state = await addSource(BOARD, "memo.txt", Buffer.from(DOC_MIXED));
     const next = await deleteSource(BOARD, state.sources[0].id);
     expect(next.sources).toHaveLength(0);
     expect(next.categories.every((c) => c.count === 0)).toBe(true);
-    await expect(fs.access(skillPath(BOARD, "kb-flows"))).rejects.toThrow();
-    await expect(fs.access(skillPath("_common", "kb-common-terms"))).rejects.toThrow();
+    expect(await buildKnowledgeContext(BOARD)).toBe("");
   });
 
   it("reextractSource は原ファイルから再抽出してエントリを差し替える", async () => {
@@ -168,11 +158,11 @@ describe("知識ベース", () => {
 });
 
 describe("共通知識の管理ビュー(/knowledge)", () => {
-  it("共通管理画面からの追加は AI の判定によらず必ず共通になる", async () => {
+  it("共通ビュー(互換経路)からの追加は AI の判定によらず必ず共通になる", async () => {
     // common=false のディレクティブでも、共通ビュー経由なら共通になる
     await addSource(null, "全社規程.txt", Buffer.from("KB|flows|全社承認標準|500万円超は部長承認|false"));
-    const skill = await fs.readFile(skillPath("_common", "kb-common-flows"), "utf-8");
-    expect(skill).toContain("全社承認標準");
+    const context = await buildKnowledgeContext(BOARD);
+    expect(context.split("# 業務横断の共通知識")[1] ?? "").toContain("全社承認標準");
   });
 
   it("getKnowledgeState(null) はここで追加した資料 + 全ボードの共通知識を返す", async () => {
@@ -210,15 +200,14 @@ describe("旧データ(資料単位スコープ)からの移行", () => {
     await writeJson(knowledgeFile("_common"), [
       { id: "e2", sourceId: "c1", category: "terms", title: "旧共通用語", content: "y" },
     ]);
-    await renderCommonSkills();
 
-    const common = await fs.readFile(skillPath("_common", "kb-common-terms"), "utf-8");
+    const context = await buildKnowledgeContext(BOARD);
+    const own = context.split("# 業務横断の共通知識")[0];
+    const common = context.split("# 業務横断の共通知識")[1] ?? "";
     expect(common).toContain("旧共通用語");
     // ボードの旧エントリは業務固有として扱われ、共通には混ざらない
-    await expect(fs.access(skillPath("_common", "kb-common-flows"))).rejects.toThrow();
-    expect(await prepareSkillsForChat(BOARD)).toEqual(
-      expect.arrayContaining(["kb-common-terms"]),
-    );
+    expect(own).toContain("旧業務ルール");
+    expect(common).not.toContain("旧業務ルール");
   });
 });
 
@@ -243,10 +232,9 @@ describe("エントリ単位の編集(AI 協働)", () => {
     )!;
     expect(saved.edited).toBe(true);
     expect(saved.common).toBe(true);
-    // 業務固有 skill からは消え、共通 skill に入る
-    await expect(fs.access(skillPath(BOARD, "kb-flows"))).rejects.toThrow();
-    const common = await fs.readFile(skillPath("_common", "kb-common-flows"), "utf-8");
-    expect(common).toContain("2億円超は役員承認");
+    // 業務セクションからは消え、共通セクションに入る
+    const context = await buildKnowledgeContext(BOARD);
+    expect(context.split("# 業務横断の共通知識")[1] ?? "").toContain("2億円超は役員承認");
   });
 
   it("再抽出しても edited エントリは上書きされない", async () => {
@@ -266,13 +254,14 @@ describe("エントリ単位の編集(AI 協働)", () => {
     expect(state.sources[0].entryCount).toBe(after.length);
   });
 
-  it("deleteEntry: 1 件だけ消えて entryCount と skill が追従する", async () => {
+  it("deleteEntry: 1 件だけ消えて entryCount と注入内容が追従する", async () => {
     const { sourceId, entries } = await seedSource();
     const bsad = entries.find((e) => e.title === "BSAD")!;
     const state = await deleteEntry(BOARD, sourceId, bsad.id);
     expect(state.sources[0].entryCount).toBe(1);
-    await expect(fs.access(skillPath("_common", "kb-common-terms"))).rejects.toThrow();
-    await expect(fs.access(skillPath(BOARD, "kb-flows"))).resolves.toBeUndefined();
+    const context = await buildKnowledgeContext(BOARD);
+    expect(context).not.toContain("BSAD");
+    expect(context).toContain("承認ルール");
   });
 
   it("proposeEntryRevision: 指示に沿った修正案が返る(保存はされない)", async () => {
@@ -393,16 +382,16 @@ describe("新しい業務の検知とボード作成提案", () => {
     const { listBoards } = await import("@/infrastructure/boards");
     expect((await listBoards()).some((b) => b.id === board.id && b.name === "口座開設")).toBe(true);
 
-    // 元スコープから資料と提案が消える
+    // 元スコープから資料と提案が消える(注入内容にも残らない)
     expect(after.sources).toHaveLength(0);
     expect(after.proposals).toHaveLength(0);
-    await expect(fs.access(skillPath(BOARD, "kb-flows"))).rejects.toThrow();
+    expect(await buildKnowledgeContext(BOARD)).not.toContain("口座開設の審査");
 
-    // 新ボードに資料・知識・skill・原資料がある
+    // 新ボードに資料・知識・原資料が移り、注入内容に現れる
     const moved = await getKnowledgeState(board.id);
     expect(moved.sources.map((s) => s.fileName)).toEqual(["口座開設フロー.txt"]);
     expect(moved.categories.find((c) => c.category === "flows")?.count).toBe(1);
-    await expect(fs.access(skillPath(board.id, "kb-flows"))).resolves.toBeUndefined();
+    expect(await buildKnowledgeContext(board.id)).toContain("口座開設の審査");
     await expect(
       fs.access(originalPath(board.id, moved.sources[0].id, "口座開設フロー.txt")),
     ).resolves.toBeUndefined();

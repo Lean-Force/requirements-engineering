@@ -1,5 +1,6 @@
-// マップ(story / バックボーン)の知識化(kb-map / kb-common-maps)の特性テスト。
-// マップ保存(storage)をトリガーに、決定的にレンダリングされることを保証する。
+// マップ(story / バックボーン)の知識化の特性テスト。
+// マップ保存(storage)をトリガーに確定済み断片がキャッシュされ、
+// buildKnowledgeContext で全ボードの system prompt へ注入されることを保証する。
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
@@ -8,10 +9,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createBoard } from "@/infrastructure/boards";
 import { saveStoryMap } from "@/infrastructure/storage";
 import {
-  prepareSkillsForChat,
+  buildKnowledgeContext,
   removeBoardMapKnowledge,
+  renderMapText,
 } from "@/infrastructure/context";
-import { boardMapSkillNames } from "@/infrastructure/context";
 import type { StoryMap } from "@/domain";
 
 let tmp: string;
@@ -29,12 +30,6 @@ afterEach(async () => {
   delete process.env.DATA_DIR;
   await fs.rm(tmp, { recursive: true, force: true });
 });
-
-const readSkill = (scope: string, name: string) =>
-  fs.readFile(
-    path.join(tmp, "workspaces", scope, ".claude", "skills", name, "SKILL.md"),
-    "utf-8",
-  );
 
 /** 場面1: 確定済みの行動 + 確定/未確定ストーリー、場面2: 未確定のみ */
 const MAP: StoryMap = {
@@ -64,36 +59,19 @@ const MAP: StoryMap = {
   ],
 };
 
-describe("マップの知識化", () => {
-  it("保存すると kb-map(マップ全体 + 確定マーク)がレンダリングされる", async () => {
+describe("マップの知識化(確定断片の注入)", () => {
+  it("保存すると確定済み要素だけが業務名つきで他ボードへ注入される", async () => {
     await saveStoryMap(A, MAP);
 
-    const skill = await readSkill(A, "kb-map");
-    expect(skill).toContain("name: kb-map");
-    expect(skill).toContain("アクター: 店員");
-    expect(skill).toContain("【確定】店員「会計する」");
-    expect(skill).toContain("【確定】店員はレシートを渡したい");
-    expect(skill).toContain("店員はポイントを案内したい"); // 未確定も載る(マークなし)
-    expect(skill).toContain("袋詰めする");
-    expect(await boardMapSkillNames(A)).toEqual(["kb-map"]);
+    const context = await buildKnowledgeContext(B);
+    expect(context).toContain("## 業務: 送金処理");
+    expect(context).toContain("【確定】店員「会計する」");
+    expect(context).toContain("レシートを渡したい");
+    expect(context).not.toContain("ポイントを案内したい"); // 未確定ストーリーは載らない
+    expect(context).not.toContain("袋詰め"); // 確定要素の無い場面は載らない
   });
 
-  it("kb-common-maps には確定済みの要素だけが業務名つきで合成される", async () => {
-    await saveStoryMap(A, MAP);
-
-    const common = await readSkill("_common", "kb-common-maps");
-    expect(common).toContain("## 業務: 送金処理");
-    expect(common).toContain("【確定】店員「会計する」");
-    expect(common).toContain("レシートを渡したい");
-    expect(common).not.toContain("ポイントを案内したい"); // 未確定ストーリーは載らない
-    expect(common).not.toContain("袋詰め"); // 確定要素の無い場面は載らない
-
-    // 他業務のチャット準備に同期される
-    const skills = await prepareSkillsForChat(B);
-    expect(skills).toContain("kb-common-maps");
-  });
-
-  it("確定要素が無いマップは kb-common-maps に現れない(全滅なら skill ごと消える)", async () => {
+  it("確定要素が無いマップは注入されない", async () => {
     const unfixed: StoryMap = {
       actors: MAP.actors,
       activities: [
@@ -106,21 +84,38 @@ describe("マップの知識化", () => {
       ],
     };
     await saveStoryMap(A, unfixed);
-    await expect(readSkill("_common", "kb-common-maps")).rejects.toThrow();
-    // kb-map(ボード内向け)は未確定でも作られる
-    await expect(readSkill(A, "kb-map")).resolves.toContain("会計する");
+    expect(await buildKnowledgeContext(B)).not.toContain("合意済みマップ");
   });
 
-  it("空のマップでは kb-map を残さない", async () => {
+  it("確定を外して保存し直すと注入からも消える", async () => {
     await saveStoryMap(A, MAP);
-    await saveStoryMap(A, { actors: [], activities: [] });
-    await expect(readSkill(A, "kb-map")).rejects.toThrow();
-    expect(await boardMapSkillNames(A)).toEqual([]);
+    expect(await buildKnowledgeContext(B)).toContain("会計する");
+    await saveStoryMap(A, {
+      actors: MAP.actors,
+      activities: [
+        {
+          id: "act-1",
+          actions: [
+            { id: "action-1", actorId: "actor-1", text: "会計する", stories: [] },
+          ],
+        },
+      ],
+    });
+    expect(await buildKnowledgeContext(B)).not.toContain("合意済みマップ");
   });
 
-  it("ボード削除相当の掃除で kb-common-maps から消える", async () => {
+  it("ボード削除相当の掃除で注入から消える", async () => {
     await saveStoryMap(A, MAP);
     await removeBoardMapKnowledge(A);
-    await expect(readSkill("_common", "kb-common-maps")).rejects.toThrow();
+    expect(await buildKnowledgeContext(B)).not.toContain("送金処理");
+  });
+
+  it("renderMapText はマップ全体(未確定含む・確定マーク付き)を返す(校正の注入用)", async () => {
+    const text = renderMapText(MAP);
+    expect(text).toContain("アクター: 店員");
+    expect(text).toContain("【確定】店員「会計する」");
+    expect(text).toContain("ポイントを案内したい"); // 未確定も載る
+    expect(text).toContain("袋詰めする");
+    expect(renderMapText({ actors: [], activities: [] })).toBe("");
   });
 });

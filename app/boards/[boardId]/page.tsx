@@ -215,10 +215,10 @@ export default function BoardPage({ params }: Props) {
           return;
         }
 
-        const { reply, storyMap: updated, versions: nextVersions, usedSkills } = data as ChatResponse;
+        const { reply, storyMap: updated, versions: nextVersions } = data as ChatResponse;
         setStoryMap(updated);
         clearHistory(); // AI がマップを更新したので、それ以前へは ⌘Z で戻さない
-        setMessages((prev) => [...prev, { role: "assistant", content: reply, usedSkills }]);
+        setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
         if (nextVersions) setVersions(nextVersions);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);

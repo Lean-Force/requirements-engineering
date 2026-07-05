@@ -12,8 +12,6 @@ export const knowledgeFile = (scope: string) =>
   path.join(workspaceDir(scope), "knowledge.json");
 export const sourceDir = (scope: string, id: string) =>
   path.join(workspaceDir(scope), "sources", id);
-export const skillsRoot = (scope: string) =>
-  path.join(workspaceDir(scope), ".claude", "skills");
 export const conflictsFile = (scope: string) =>
   path.join(workspaceDir(scope), "conflicts.json");
 export const proposalsFile = (scope: string) =>

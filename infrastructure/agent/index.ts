@@ -81,76 +81,40 @@ function renderConversation(conversation: ChatMessage[]): string {
 
 /**
  * 会話履歴から「返信 + 更新後マップ」を生成する。
- * skillNames には有効なドメイン知識(skill 名)を渡す。空配列なら知識なし。
+ * knowledgeContext は buildKnowledgeContext の結果(知識 + 共通 + 確定マップの全文)。
+ * system prompt へ注入するので、AI は選択的に読むのではなく常に全体が見える。
  */
 export async function generate(
   boardId: string,
   conversation: ChatMessage[],
-  skillNames: string[],
-): Promise<Pick<ChatResponse, "reply" | "storyMap" | "usedSkills">> {
+  knowledgeContext: string,
+): Promise<Pick<ChatResponse, "reply" | "storyMap">> {
   if (isFakeLlm()) return fakeGenerate(conversation);
   const workspace = workspaceDir(boardId);
   // cwd に指定するため、初回チャット時などまだ無ければ作る(無いと spawn に失敗する)
   await fs.mkdir(workspace, { recursive: true });
-  const maxTurns = Number(process.env.CHAT_MAX_TURNS || 24);
+  const maxTurns = Number(process.env.CHAT_MAX_TURNS || 12);
 
   const q = query({
     prompt: renderConversation(conversation),
     options: {
       model: process.env.ANTHROPIC_MODEL || undefined,
       cwd: workspace,
-      systemPrompt: SYSTEM_PROMPT,
-      // skills は cwd の .claude/skills から発見される。settingSources を
-      // 指定しないと設定を読まないため project を明示する。
-      settingSources: ["project"],
-      skills: skillNames,
-      // ボード操作のカスタムツール(チャットからのボード作成)
+      // 参照情報(不変)を先、ルールを含めて 1 本の system prompt に。
+      // 知識部分はターン間で不変なのでプロンプトキャッシュが効く
+      systemPrompt: knowledgeContext
+        ? `${SYSTEM_PROMPT}\n\n---\n\n以下は参照情報(ドメイン知識・共通知識・各業務の合意済みマップ)。\n\n${knowledgeContext}`
+        : SYSTEM_PROMPT,
+      settingSources: [],
+      // ボード操作のカスタムツール(チャットからのボード作成)のみ許可
       mcpServers: { usm: boardToolsServer() },
-      // 知識を読む + ボード操作以外の行動はさせない
-      allowedTools: [
-        "Read",
-        "Glob",
-        "Grep",
-        "mcp__usm__list_boards",
-        "mcp__usm__create_board",
-      ],
+      allowedTools: ["mcp__usm__list_boards", "mcp__usm__create_board"],
       maxTurns,
       outputFormat: { type: "json_schema", schema: CHAT_OUTPUT_SCHEMA },
-      // ワークスペース外の読み取りを遮断する(Read は絶対パスで任意の
-      // ファイルを指せるため、対象パスを検査して deny する)。
-      // allowedTools のツールは canUseTool より先に自動許可されるため、
-      // すべての呼び出しに介入できる PreToolUse フックで検査する。
-      hooks: workspaceGuard(workspace),
     },
   });
 
-  // AI が実際に読んだドメイン知識。skill の読み込みは Skill ツール
-  // ({skill: "kb-…"})で行われる。SKILL.md を直接 Read するケースも保険で拾う。
-  // 「読むべき時に読んだか」の eval と、参照表示に使う。
-  const usedSkills = new Set<string>();
-  // セッションに実際にロードされた skill(「渡したつもり」との突合用)
-  let loadedSkills: string[] = [];
-
   for await (const message of q) {
-    if (message.type === "system" && message.subtype === "init") {
-      loadedSkills = message.skills;
-      warnIfSkillsMissing("chat", skillNames, loadedSkills);
-      continue;
-    }
-    if (message.type === "assistant") {
-      for (const block of message.message.content) {
-        if (block.type !== "tool_use") continue;
-        if (block.name === "Skill") {
-          const skill = (block.input as { skill?: string }).skill ?? "";
-          if (skill.startsWith("kb-")) usedSkills.add(skill);
-        } else if (block.name === "Read") {
-          const filePath = (block.input as { file_path?: string }).file_path ?? "";
-          const hit = /\.claude\/skills\/(kb-[^/]+)\/SKILL\.md$/.exec(filePath);
-          if (hit) usedSkills.add(hit[1]);
-        }
-      }
-      continue;
-    }
     if (message.type !== "result") continue;
 
     if (message.subtype === "success") {
@@ -161,8 +125,6 @@ export async function generate(
           kind: "chat-usage",
           turns: message.num_turns,
           durationMs: message.duration_ms,
-          usedSkills: [...usedSkills],
-          loadedSkills,
           usage: message.usage,
           costUsd: message.total_cost_usd,
         }),
@@ -173,7 +135,7 @@ export async function generate(
       if (!output) {
         throw new Error("モデルから構造化出力が得られませんでした");
       }
-      return { ...output, usedSkills: [...usedSkills] };
+      return output;
     }
 
     // result のエラー種別(ループ上限・構造化出力の失敗など)
@@ -191,12 +153,13 @@ export async function generate(
 
 /**
  * 付箋(行動 / ストーリー)1 枚の本文を推奨形式・ドメイン知識(用語)に沿って推敲する。
- * skillNames はチャットと同じ(prepareSkillsForChat の結果)を渡す。
+ * knowledgeContext(知識全文)と mapText(この業務の現在のマップ全文)を注入する。
  */
 export async function refineCard(
   boardId: string,
   req: RefineRequest,
-  skillNames: string[],
+  knowledgeContext: string,
+  mapText: string,
 ): Promise<RefineResponse> {
   if (isFakeLlm()) return fakeRefine(req);
   const workspace = workspaceDir(boardId);
@@ -218,22 +181,21 @@ export async function refineCard(
     options: {
       model: process.env.ANTHROPIC_MODEL || undefined,
       cwd: workspace,
-      systemPrompt: REFINE_SYSTEM_PROMPT,
-      settingSources: ["project"],
-      skills: skillNames,
-      // 用語合わせのために知識を読む以外の行動はさせない
-      allowedTools: ["Read", "Glob", "Grep"],
-      maxTurns: 8,
+      systemPrompt: [
+        REFINE_SYSTEM_PROMPT,
+        knowledgeContext ? `---\n\n以下は参照情報(ドメイン知識)。\n\n${knowledgeContext}` : null,
+        mapText ? `---\n\n# この業務の現在のマップ\n\n${mapText}` : null,
+      ]
+        .filter((x): x is string => x !== null)
+        .join("\n\n"),
+      settingSources: [],
+      allowedTools: [],
+      maxTurns: 4,
       outputFormat: { type: "json_schema", schema: REFINE_SCHEMA },
-      hooks: workspaceGuard(workspace),
     },
   });
 
   for await (const message of q) {
-    if (message.type === "system" && message.subtype === "init") {
-      warnIfSkillsMissing("refine", skillNames, message.skills);
-      continue;
-    }
     if (message.type !== "result") continue;
     if (message.subtype === "success") {
       console.log(
@@ -611,29 +573,6 @@ ${entriesText}`,
 }
 
 // ---- 内部 ----------------------------------------------------------------
-
-/**
- * 渡した skill 名がセッションへ実際にロードされたかを突合し、欠けていれば warn を出す。
- * SKILL.md はあるのに SDK が発見しない類の事故(settingSources 未指定など)を運用ログで検知する。
- */
-function warnIfSkillsMissing(
-  where: string,
-  requested: string[],
-  loaded: string[],
-): void {
-  const missing = requested.filter((name) => !loaded.includes(name));
-  if (missing.length === 0) return;
-  console.warn(
-    JSON.stringify({
-      at: new Date().toISOString(),
-      kind: "skills-mismatch",
-      where,
-      requested,
-      loaded,
-      missing,
-    }),
-  );
-}
 
 /**
  * ワークスペース外の読み取りを遮断する PreToolUse フック。

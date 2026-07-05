@@ -106,7 +106,7 @@ export async function saveStoryMap(
   pushVersion(s, source, summary, normalized);
   s.storyMap = normalized;
   await r.saveSession(s);
-  // マップも知識(kb-map / kb-common-maps)なので、保存のたびにビューを作り直す
+  // マップも知識(確定断片は system prompt 注入の材料)なので、保存のたびにキャッシュを更新する
   await renderMapKnowledge(boardId, normalized);
   return s.versions.map(toMeta);
 }

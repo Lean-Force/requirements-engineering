@@ -1,4 +1,6 @@
 // レベル3: AI が知識を「正しく使うか」の eval(実 LLM を呼ぶ)。
+// 知識は system prompt へ全文注入される(選択的読込はない)ため、
+// 判定は「事実がマップ/返信に正しく現れるか・混入しないか」に寄せる。
 //
 //   npm run eval
 //
@@ -7,7 +9,6 @@
 // エントリを直接書き込むため、テスト対象は「AI が知識を読む・使う」部分だけ。
 //
 // 判定は決定的に寄せる:
-//   - usedSkills(generate が記録する「実際に Read された skill」)への包含/除外
 //   - structured output(マップ JSON)への事実の包含/除外
 //   - reply への包含
 // LLM のゆれで際どいケースは、期待を「事実の存在」に留めて文言一致を避ける。
@@ -21,7 +22,7 @@ import {
   sourcesFile,
   writeJson,
 } from "../../infrastructure/context/repository";
-import { renderCommonSkills, renderSkills, prepareSkillsForChat } from "../../infrastructure/context/skills";
+import { buildKnowledgeContext } from "../../infrastructure/context/knowledge";
 import { saveStoryMap } from "../../infrastructure/storage";
 import { writeJson } from "../../infrastructure/context/repository";
 import { COMMON_SCOPE } from "../../infrastructure/context/workspace";
@@ -61,8 +62,6 @@ async function seed(
   }));
   await writeJson(sourcesFile(scope), sources);
   await writeJson(knowledgeFile(scope), knowledge);
-  if (scope === COMMON_SCOPE) await renderCommonSkills();
-  else await renderSkills(scope);
 }
 
 // ---- ケース定義 -------------------------------------------------------------
@@ -73,8 +72,6 @@ interface EvalCase {
   message: string;
   /** 会話に添付する現在のマップ(省略時は空マップ) */
   map?: unknown;
-  usedMustInclude?: string[];
-  usedMustBeEmpty?: boolean;
   mapMustInclude?: string[];
   mapMustExclude?: string[];
   replyMustInclude?: string[];
@@ -82,21 +79,20 @@ interface EvalCase {
 
 const CASES: EvalCase[] = [
   {
-    name: "読むべき時に読む + 正確に反映 + 矛盾は業務優先",
+    name: "知識を正確に反映 + 矛盾は業務優先",
     boardId: "eval-soukin",
     message:
       "承認のルールに従って、承認の場面をマップに追加して。金額の閾値も本文に明記して。",
-    usedMustInclude: ["kb-flows"],
     mapMustInclude: ["部長", "1,000万"],
     mapMustExclude: ["500万"], // 共通規程(500万)ではなく業務の知識(1,000万)を採る
   },
   {
-    name: "読まなくていい時に読まない(機械的な操作)",
+    name: "機械的な操作に知識のノイズが混入しない",
     boardId: "eval-soukin",
     message:
-      "アクター「テスト太郎」を1人追加して。それ以外は何も変えないで。知識の参照も不要です。",
-    usedMustBeEmpty: true,
+      "アクター「テスト太郎」を1人追加して。それ以外は何も変えないで。",
     mapMustInclude: ["テスト太郎"],
+    mapMustExclude: ["1,000万"], // 頼んでいない承認ルールを勝手に足さない
   },
   {
     name: "業務間の分離(他業務の知識は存在しない)",
@@ -116,14 +112,12 @@ const CASES: EvalCase[] = [
     name: "データ定義の正確な反映(値域)",
     boardId: "eval-soukin",
     message: "送金種別の選択肢を、それぞれストーリーとして明記して追加して。",
-    usedMustInclude: ["kb-data"],
     mapMustInclude: ["即時", "予約"],
   },
   {
-    name: "共通知識(用語集)を読んで答える",
+    name: "共通知識(用語集)に基づいて答える",
     boardId: "eval-koza",
     message: "BSAD という言葉の意味を reply で説明して。マップは変えないで。",
-    usedMustInclude: ["kb-common-terms"],
     replyMustInclude: ["基本設計書"],
   },
   {
@@ -158,11 +152,10 @@ const CASES: EvalCase[] = [
     replyMustInclude: ["確定"],
   },
   {
-    name: "他業務の合意済みマップ(kb-common-maps)を参照して答える",
+    name: "他業務の合意済みマップを参照して答える",
     boardId: "eval-koza",
     message:
       "「送金処理」の業務で確定(チーム合意)済みになっている承認まわりの決定があれば、reply で教えて。マップは変えないで。",
-    usedMustInclude: ["kb-common-maps"],
     replyMustInclude: ["役員"],
   },
 ];
@@ -363,7 +356,7 @@ async function main() {
   }
 
   for (const c of CASES) {
-    const skills = await prepareSkillsForChat(c.boardId);
+    const knowledgeContext = await buildKnowledgeContext(c.boardId);
     const started = Date.now();
     const res = await generate(
       c.boardId,
@@ -373,16 +366,11 @@ async function main() {
           content: `${c.message}\n\n---\n現在の User Story Map(この内容をベースに更新してください):\n${JSON.stringify(c.map ?? { actors: [], activities: [] })}`,
         },
       ],
-      skills,
+      knowledgeContext,
     );
     const mapJson = JSON.stringify(res.storyMap);
-    const used = res.usedSkills ?? [];
 
     const problems: string[] = [];
-    for (const s of c.usedMustInclude ?? [])
-      if (!used.includes(s)) problems.push(`参照されるべき ${s} が未参照(実際: ${used.join(",") || "なし"})`);
-    if (c.usedMustBeEmpty && used.length > 0)
-      problems.push(`参照不要なのに読んだ: ${used.join(",")}`);
     for (const t of c.mapMustInclude ?? [])
       if (!mapJson.includes(t)) problems.push(`マップに「${t}」が無い`);
     for (const t of c.mapMustExclude ?? [])

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isConfigured, refineCard } from "@/infrastructure/agent";
-import { boardMapSkillNames, prepareSkillsForChat } from "@/infrastructure/context";
+import { buildKnowledgeContext, renderMapText } from "@/infrastructure/context";
+import { loadStoryMap } from "@/infrastructure/storage";
 import { getBoard } from "@/infrastructure/boards";
 import type { RefineRequest } from "@/contracts";
 
@@ -49,12 +50,12 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   try {
-    // 校正はマップ全体(kb-map)も参照できる(場面の粒度・言い回しとの整合)
-    const skills = [
-      ...(await prepareSkillsForChat(params.boardId)),
-      ...(await boardMapSkillNames(params.boardId)),
-    ];
-    const result = await refineCard(params.boardId, body, skills);
+    // 校正には知識全文と現在のマップ全文を注入する(場面の粒度・言い回しとの整合)
+    const [knowledgeContext, map] = await Promise.all([
+      buildKnowledgeContext(params.boardId),
+      loadStoryMap(params.boardId),
+    ]);
+    const result = await refineCard(params.boardId, body, knowledgeContext, renderMapText(map));
     return NextResponse.json(result);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

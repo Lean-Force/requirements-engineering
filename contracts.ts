@@ -5,8 +5,6 @@ import type { StoryMap } from "@/domain";
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
-  /** assistant のターンで実際に参照したドメイン知識 skill 名(参照表示用) */
-  usedSkills?: string[];
 }
 
 /** マップの 1 スナップショット(版)。保存実体には storyMap 全体を含む。 */
@@ -43,8 +41,6 @@ export interface ChatResponse {
   reply: string;
   storyMap: StoryMap;
   versions?: StoryMapVersionMeta[];
-  /** このターンで AI が実際に読んだドメイン知識 skill 名(kb-*)。eval・参照表示用 */
-  usedSkills?: string[];
 }
 
 /** 付箋(行動 / ストーリー)の AI 校正リクエスト(/api/boards/[id]/refine) */

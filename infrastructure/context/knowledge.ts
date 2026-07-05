@@ -8,12 +8,11 @@
 //
 //   workspaces/<boardId>/
 //     sources.json / knowledge.json / sources/<id>/<原ファイル>
-//     .claude/skills/kb-<cat>/SKILL.md        ← このボードの業務固有知識
-//     .claude/skills/kb-common-<cat>/SKILL.md ← チャット直前に _common から同期コピー
-//   workspaces/_common/
-//     .claude/skills/kb-common-<cat>/SKILL.md ← 全スコープの common エントリの合成(正本)
+//   workspaces/_common/  … 旧共通アップロード互換 + map-snippets(確定マップ断片)
 //
-// 永続化は repository.ts、AI 向けビュー(SKILL.md)のレンダリングは skills.ts が担う。
+// AI へは buildKnowledgeContext が system prompt 用の全文テキストを組み立てて渡す
+// (Agent Skill 機構は撤去済み。知識は常に全文提示され、選択的読込はない)。
+// 永続化は repository.ts。
 // エントリは出典(sourceId)を保持する。同じタイトルが複数ソースから来た場合は
 // 両論併記で出典を明示する(勝手に統合して情報を落とさない)。
 
@@ -49,12 +48,8 @@ import {
   sourcesFile,
   writeJson,
 } from "./repository";
-import {
-  CATEGORIES,
-  renderCategoryBody,
-  renderCommonSkills,
-  renderSkills,
-} from "./skills";
+import { CATEGORIES, renderCategoryBody } from "./skills";
+import { confirmedMapSections } from "./map-skills";
 import { COMMON_SCOPE, workspaceDir } from "./workspace";
 
 // ---- 読み取り --------------------------------------------------------------
@@ -197,7 +192,6 @@ export async function addSource(
   entries.push(...added);
   await writeJson(sourcesFile(scope), sources);
   await writeJson(knowledgeFile(scope), entries);
-  await rerender(scope);
   await scanConflicts(boardId, id, fileName, [...kept, ...added]);
   await scanNewBusiness(boardId, id, fileName, added);
   return getKnowledgeState(boardId);
@@ -241,7 +235,6 @@ export async function reextractSource(
   meta.entryCount = kept.length + extracted.length;
   await writeJson(sourcesFile(scope), sources);
   await writeJson(knowledgeFile(scope), entries);
-  await rerender(scope);
   await scanConflicts(
     boardId,
     sourceId,
@@ -264,7 +257,6 @@ export async function setSourceEnabled(
   if (!source) throw new Error("指定の資料が見つかりません");
   source.enabled = enabled;
   await writeJson(sourcesFile(scope), sources);
-  await rerender(scope);
   return getKnowledgeState(boardId);
 }
 
@@ -293,7 +285,6 @@ export async function deleteSource(
     proposalsFile(scope),
     (await readProposals(scope)).filter((p) => p.sourceId !== sourceId),
   );
-  await rerender(scope);
   return getKnowledgeState(boardId);
 }
 
@@ -476,9 +467,7 @@ export async function acceptBoardProposal(
       knowledgeFile(scope),
       fromEntries.filter((e) => e.sourceId !== proposal.sourceId),
     );
-    await renderSkills(board.id);
-    await rerender(scope);
-  }
+    }
 
   await writeJson(
     proposalsFile(scope),
@@ -557,7 +546,6 @@ export async function updateEntry(
   entry.common = applyScopePolicy(entry.category, patch.common, boardId === null);
   entry.edited = true;
   await writeJson(knowledgeFile(scope), entries);
-  await rerender(scope);
   return getKnowledgeState(boardId);
 }
 
@@ -578,8 +566,41 @@ export async function deleteEntry(
   if (meta) meta.entryCount = next.filter((e) => e.sourceId === sourceId).length;
   await writeJson(knowledgeFile(scope), next);
   await writeJson(sourcesFile(scope), sources);
-  await rerender(scope);
   return getKnowledgeState(boardId);
+}
+
+// ---- AI への注入(system prompt 用の全文テキスト) ----------------------------
+
+/**
+ * チャット・校正の system prompt に注入する参照情報を組み立てる:
+ * この業務の知識(業務固有)+ 業務横断の共通知識 + 各業務の確定済みマップ。
+ * 無ければ空文字。出典(資料名)付きで、業務優先ルールの判断材料になる。
+ */
+export async function buildKnowledgeContext(boardId: string): Promise<string> {
+  const { labelOf, entries } = await view(boardId);
+  const own = entries.filter((e) => !e.common);
+  const common = entries.filter((e) => e.common);
+
+  const sections: string[] = [];
+  const renderGroup = (title: string, list: KnowledgeEntry[]): void => {
+    const bodies = CATEGORIES.map((c) => {
+      const body = renderCategoryBody(c.category, labelOf, list);
+      return body ? `## ${c.label}\n\n${body}` : null;
+    }).filter((b): b is string => b !== null);
+    if (bodies.length > 0) sections.push(`# ${title}\n\n${bodies.join("\n\n")}`);
+  };
+  renderGroup("この業務のドメイン知識", own);
+  renderGroup("業務横断の共通知識", common);
+
+  const maps = await confirmedMapSections();
+  if (maps.length > 0) {
+    sections.push(
+      `# 各業務の合意済みマップ(確定 = チーム合意。「なぜなら」以降は合意された理由)\n\n${maps
+        .map((m) => `## 業務: ${m.name}\n\n${m.body}`)
+        .join("\n\n")}`,
+    );
+  }
+  return sections.join("\n\n");
 }
 
 // ---- 閲覧(出典確認・カテゴリビュー) ---------------------------------------
@@ -624,12 +645,6 @@ export async function getSourceMarkdown(
 }
 
 // ---- 内部 ----------------------------------------------------------------
-
-/** スコープの変更を skill へ反映する(共通知識は全スコープの合成なので常に作り直す) */
-async function rerender(scope: string): Promise<void> {
-  if (scope !== COMMON_SCOPE) await renderSkills(scope);
-  await renderCommonSkills();
-}
 
 function newId(): string {
   return `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;

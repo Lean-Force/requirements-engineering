@@ -9,7 +9,6 @@
 // 入力に埋め込むディレクティブ(1 行 1 つ):
 //   FAKEMAP:{...json...}        generate: 返す storyMap(無ければ現在のマップをそのまま返す)
 //   FAKEREPLY:テキスト           generate: 返信文
-//   FAKESKILLS:kb-a,kb-b        generate: usedSkills
 //   KB|category|title|content|common      抽出: knowledge エントリ 1 件
 //   NOKB                        抽出: 空(「抽出できない」経路の検証用)
 //   CONFLICTS_JSON:[{...}]      矛盾検出: 検出結果の配列(エントリ content に埋め込める)
@@ -33,7 +32,7 @@ const line = (text: string, prefix: string): string | undefined =>
 
 export function fakeGenerate(
   conversation: ChatMessage[],
-): { reply: string; storyMap: StoryMap; usedSkills: string[] } {
+): { reply: string; storyMap: StoryMap } {
   const text = conversation.map((m) => m.content).join("\n");
   const mapJson = line(text, "FAKEMAP:");
   let storyMap: StoryMap = { actors: [], activities: [] };
@@ -47,11 +46,6 @@ export function fakeGenerate(
   return {
     reply: line(text, "FAKEREPLY:") ?? "(fake) マップを更新しました",
     storyMap,
-    usedSkills:
-      line(text, "FAKESKILLS:")
-        ?.split(",")
-        .map((s) => s.trim())
-        .filter(Boolean) ?? [],
   };
 }
 
