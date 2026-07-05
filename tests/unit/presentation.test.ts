@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createBoard } from "@/infrastructure/boards";
 import {
   addSource,
+  buildBoardContext,
   buildKnowledgeContext,
   reextractSource,
   setSourceEnabled,
@@ -138,5 +139,29 @@ describe("AI への提示内容(レベル2: system prompt 注入)", () => {
 
   it("知識もマップも無ければ注入内容は空", async () => {
     expect(await buildKnowledgeContext(A)).toBe("");
+  });
+
+  it("標準ブロックは 業務一覧 + 知識 + 現在のマップ を 1 本にまとめる", async () => {
+    await addSource(A, "送金.txt", Buffer.from("KB|flows|承認ルール|1,000万円超は部長承認|false"));
+    await saveStoryMap(A, {
+      actors: [{ id: "a1", name: "店員" }],
+      activities: [
+        { id: "act1", actions: [{ id: "ac1", actorId: "a1", text: "会計する", stories: [] }] },
+      ],
+    });
+
+    const block = await buildBoardContext(A);
+    // 業務一覧(現在のボードに印)
+    expect(block).toContain("# 業務(ボード)一覧");
+    expect(block).toContain("- 業務A(現在のボード)");
+    expect(block).toContain("- 業務B");
+    // 知識
+    expect(block).toContain("承認ルール");
+    // 現在のマップ(JSON)
+    expect(block).toContain("# 現在の User Story Map");
+    expect(block).toContain('"text":"会計する"');
+    // 共通ビュー(null)では業務一覧と知識のみで、マップは入らない
+    const commonBlock = await buildBoardContext(null);
+    expect(commonBlock).not.toContain("# 現在の User Story Map");
   });
 });

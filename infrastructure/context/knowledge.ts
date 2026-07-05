@@ -50,6 +50,8 @@ import {
 } from "./repository";
 import { CATEGORIES, renderCategoryBody } from "./skills";
 import { confirmedMapSections } from "./map-skills";
+import { loadStoryMap } from "../storage";
+import type { StoryMap } from "@/domain";
 import { COMMON_SCOPE, workspaceDir } from "./workspace";
 
 // ---- 読み取り --------------------------------------------------------------
@@ -154,7 +156,7 @@ export async function addSource(
   const extracted = await extractKnowledgeMulti(
     fileName,
     markdown,
-    await buildKnowledgeContext(boardId),
+    await buildBoardContext(boardId),
   );
   if (extracted.length === 0) {
     throw new Error(
@@ -221,7 +223,7 @@ export async function reextractSource(
   const extracted = await extractKnowledgeMulti(
     meta.fileName,
     markdown,
-    await buildKnowledgeContext(boardId),
+    await buildBoardContext(boardId),
   );
   if (extracted.length === 0) {
     throw new Error(`ドメイン知識を抽出できませんでした: ${meta.fileName}`);
@@ -409,13 +411,11 @@ async function scanNewBusiness(
       boardId === null
         ? "共通スコープ(特定の業務に紐づかない)"
         : `業務「${boards.find((b) => b.id === boardId)?.name ?? boardId}」のボード`;
-    const maps = await confirmedMapSections();
     const detected = await detectNewBusiness(
       fileName,
       newEntries.map((e) => `${e.title}: ${e.content}`).join("\n"),
-      boards.map((b) => b.name),
       intake,
-      maps.map((m) => `## 業務: ${m.name}\n${m.body}`).join("\n\n"),
+      await buildBoardContext(boardId),
     );
     if (detected.isNewBusiness && detected.name.trim()) {
       remaining.push({
@@ -543,7 +543,7 @@ export async function proposeEntryRevision(
     markdown,
     entry,
     instruction,
-    await buildKnowledgeContext(boardId),
+    await buildBoardContext(boardId),
   );
 }
 
@@ -589,9 +589,41 @@ export async function deleteEntry(
 // ---- AI への注入(system prompt 用の全文テキスト) ----------------------------
 
 /**
- * チャット・校正の system prompt に注入する参照情報を組み立てる:
- * この業務の知識(業務固有)+ 業務横断の共通知識 + 各業務の確定済みマップ。
- * 無ければ空文字。出典(資料名)付きで、業務優先ルールの判断材料になる。
+ * すべての AI 行動が注入する「標準コンテキストブロック」を組み立てる:
+ *   業務(ボード)一覧 + この業務の知識 + 業務横断の共通知識
+ *   + 各業務の確定済みマップ + 現在の User Story Map(ボードのとき)。
+ * currentMap を渡すとそれを使う(チャットはミューテックス内のスナップショットを渡す)。
+ */
+export async function buildBoardContext(
+  boardId: string | null,
+  currentMap?: StoryMap,
+): Promise<string> {
+  const sections: string[] = [];
+
+  const boards = await listBoards();
+  if (boards.length > 0) {
+    sections.push(
+      `# 業務(ボード)一覧\n${boards
+        .map((b) => `- ${b.name}${b.id === boardId ? "(現在のボード)" : ""}`)
+        .join("\n")}`,
+    );
+  }
+
+  const knowledge = await buildKnowledgeContext(boardId);
+  if (knowledge) sections.push(knowledge);
+
+  if (boardId !== null) {
+    const map = currentMap ?? (await loadStoryMap(boardId));
+    sections.push(
+      `# 現在の User Story Map(この業務の現状)\n\n${JSON.stringify(map)}`,
+    );
+  }
+  return sections.join("\n\n");
+}
+
+/**
+ * 知識部分の参照情報: この業務の知識(業務固有)+ 業務横断の共通知識 +
+ * 各業務の確定済みマップ。無ければ空文字。出典(資料名)付き。
  */
 export async function buildKnowledgeContext(boardId: string | null): Promise<string> {
   const { labelOf, entries } = await view(boardId);

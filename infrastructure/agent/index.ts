@@ -81,16 +81,15 @@ function renderConversation(conversation: ChatMessage[]): string {
 
 /**
  * 会話履歴から「返信 + 更新後マップ」を生成する。
- * knowledgeContext(知識 + 共通 + 確定マップ)と currentMap(現在のマップ)を
- * system prompt へ注入する。AI は選択的に読むのではなく常に全体が見える。
+ * boardContext は buildBoardContext の結果(業務一覧 + 知識 + 共通 + 確定マップ +
+ * 現在のマップ)。system prompt へ注入するので AI には常に全体が見える。
  */
 export async function generate(
   boardId: string,
   conversation: ChatMessage[],
-  knowledgeContext: string,
-  currentMap: StoryMap,
+  boardContext: string,
 ): Promise<Pick<ChatResponse, "reply" | "storyMap">> {
-  if (isFakeLlm()) return fakeGenerate(conversation, currentMap);
+  if (isFakeLlm()) return fakeGenerate(conversation, boardContext);
   const workspace = workspaceDir(boardId);
   // cwd に指定するため、初回チャット時などまだ無ければ作る(無いと spawn に失敗する)
   await fs.mkdir(workspace, { recursive: true });
@@ -101,17 +100,8 @@ export async function generate(
     options: {
       model: process.env.ANTHROPIC_MODEL || undefined,
       cwd: workspace,
-      // ルール → 参照情報(不変) → 現在のマップ(毎ターン変わるので末尾)の順で
-      // 1 本の system prompt にする
-      systemPrompt: [
-        SYSTEM_PROMPT,
-        knowledgeContext
-          ? `---\n\n以下は参照情報(ドメイン知識・共通知識・各業務の合意済みマップ)。\n\n${knowledgeContext}`
-          : null,
-        `---\n\n# 現在の User Story Map(この内容をベースに更新後の全体を返す)\n\n${JSON.stringify(currentMap)}`,
-      ]
-        .filter((x): x is string => x !== null)
-        .join("\n\n"),
+      // ルール + 標準コンテキストブロックの 1 本の system prompt
+      systemPrompt: withKnowledgeContext(SYSTEM_PROMPT, boardContext),
       settingSources: [],
       // ボード操作のカスタムツール(チャットからのボード作成)のみ許可
       mcpServers: { usm: boardToolsServer() },
@@ -160,13 +150,12 @@ export async function generate(
 
 /**
  * 付箋(行動 / ストーリー)1 枚の本文を推奨形式・ドメイン知識(用語)に沿って推敲する。
- * knowledgeContext(知識全文)と mapText(この業務の現在のマップ全文)を注入する。
+ * boardContext(標準コンテキストブロック。現在のマップ含む)を注入する。
  */
 export async function refineCard(
   boardId: string,
   req: RefineRequest,
-  knowledgeContext: string,
-  mapText: string,
+  boardContext: string,
 ): Promise<RefineResponse> {
   if (isFakeLlm()) return fakeRefine(req);
   const workspace = workspaceDir(boardId);
@@ -188,13 +177,7 @@ export async function refineCard(
     options: {
       model: process.env.ANTHROPIC_MODEL || undefined,
       cwd: workspace,
-      systemPrompt: [
-        REFINE_SYSTEM_PROMPT,
-        knowledgeContext ? `---\n\n以下は参照情報(ドメイン知識)。\n\n${knowledgeContext}` : null,
-        mapText ? `---\n\n# この業務の現在のマップ\n\n${mapText}` : null,
-      ]
-        .filter((x): x is string => x !== null)
-        .join("\n\n"),
+      systemPrompt: withKnowledgeContext(REFINE_SYSTEM_PROMPT, boardContext),
       settingSources: [],
       allowedTools: [],
       maxTurns: 4,
@@ -242,7 +225,7 @@ export async function extractKnowledge(
   fileName: string,
   markdown: string,
   focus?: KnowledgeCategory,
-  knowledgeContext = "",
+  boardContext = "",
 ): Promise<ExtractedEntry[]> {
   if (isFakeLlm()) return fakeExtract(markdown);
   // cwd に指定するため、まだ無ければ作る(無いと spawn に失敗する)。
@@ -253,7 +236,7 @@ export async function extractKnowledge(
     options: {
       model: process.env.ANTHROPIC_MODEL || undefined,
       cwd: dataRoot(),
-      systemPrompt: withKnowledgeContext(extractSystemPrompt(focus), knowledgeContext),
+      systemPrompt: withKnowledgeContext(extractSystemPrompt(focus), boardContext),
       settingSources: [],
       allowedTools: [],
       maxTurns: 4,
@@ -302,7 +285,7 @@ export async function extractKnowledge(
 export async function extractKnowledgeMulti(
   fileName: string,
   markdown: string,
-  knowledgeContext = "",
+  boardContext = "",
 ): Promise<ExtractedEntry[]> {
   if (isFakeLlm()) return fakeExtract(markdown);
   // 資料をファイルとして置き、subagent に Read させる
@@ -333,7 +316,7 @@ export async function extractKnowledgeMulti(
             `extract-${c.category}`,
             {
               description: `${c.label}(${c.detail})の観点で資料 source.md から知識エントリを抽出する`,
-              prompt: withKnowledgeContext(extractSubagentPrompt(c.category), knowledgeContext),
+              prompt: withKnowledgeContext(extractSubagentPrompt(c.category), boardContext),
               tools: ["Read"],
             },
           ]),
@@ -410,7 +393,7 @@ export async function reviseEntry(
   sourceMarkdown: string,
   current: { category: KnowledgeCategory; title: string; content: string; common: boolean },
   instruction: string,
-  knowledgeContext = "",
+  boardContext = "",
 ): Promise<EntryRevision> {
   if (isFakeLlm()) return fakeReviseEntry(current, instruction);
   await fs.mkdir(dataRoot(), { recursive: true });
@@ -430,7 +413,7 @@ ${instruction}`,
     options: {
       model: process.env.ANTHROPIC_MODEL || undefined,
       cwd: dataRoot(),
-      systemPrompt: withKnowledgeContext(ENTRY_REVISE_SYSTEM_PROMPT, knowledgeContext),
+      systemPrompt: withKnowledgeContext(ENTRY_REVISE_SYSTEM_PROMPT, boardContext),
       settingSources: [],
       allowedTools: [],
       maxTurns: 4,
@@ -531,9 +514,8 @@ ${existingBlocks}`,
 export async function detectNewBusiness(
   fileName: string,
   entriesText: string,
-  existingBoards: string[],
   intake: string,
-  confirmedMaps = "",
+  boardContext = "",
 ): Promise<DetectedBusiness> {
   if (isFakeLlm()) return fakeDetectNewBusiness(entriesText);
   await fs.mkdir(dataRoot(), { recursive: true });
@@ -541,16 +523,13 @@ export async function detectNewBusiness(
     prompt: `# 取り込み先
 ${intake}
 
-# 既存の業務(ボード)一覧
-${existingBoards.map((b) => `- ${b}`).join("\n") || "(なし)"}
-${confirmedMaps ? `\n# 各業務の合意済みマップ(業務の実態の判断材料)\n\n${confirmedMaps}\n` : ""}
 # 取り込んだ資料: ${fileName}(抽出された知識)
 
 ${entriesText}`,
     options: {
       model: process.env.ANTHROPIC_MODEL || undefined,
       cwd: dataRoot(),
-      systemPrompt: BUSINESS_DETECT_SYSTEM_PROMPT,
+      systemPrompt: withKnowledgeContext(BUSINESS_DETECT_SYSTEM_PROMPT, boardContext),
       settingSources: [],
       allowedTools: [],
       maxTurns: 4,
@@ -585,10 +564,13 @@ ${entriesText}`,
 
 // ---- 内部 ----------------------------------------------------------------
 
-/** system prompt の末尾に参照情報(既存知識)を付ける(空なら素通し) */
-function withKnowledgeContext(systemPrompt: string, knowledgeContext: string): string {
-  if (!knowledgeContext) return systemPrompt;
-  return `${systemPrompt}\n\n---\n\n以下は参照情報(既存のドメイン知識・共通知識・合意済みマップ)。\n表記・用語はこの正に合わせること。\n\n${knowledgeContext}`;
+/**
+ * system prompt の末尾に標準コンテキストブロック(業務一覧・ドメイン知識・共通知識・
+ * 合意済みマップ・現在のマップ)を付ける(空なら素通し)。
+ */
+function withKnowledgeContext(systemPrompt: string, boardContext: string): string {
+  if (!boardContext) return systemPrompt;
+  return `${systemPrompt}\n\n---\n\n以下は参照情報(業務一覧・ドメイン知識・共通知識・合意済みマップ・現在のマップ)。\n表記・用語はこの正に合わせること。\n\n${boardContext}`;
 }
 
 /**

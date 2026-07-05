@@ -22,7 +22,7 @@ import {
   sourcesFile,
   writeJson,
 } from "../../infrastructure/context/repository";
-import { buildKnowledgeContext } from "../../infrastructure/context/knowledge";
+import { buildBoardContext } from "../../infrastructure/context/knowledge";
 import { saveStoryMap } from "../../infrastructure/storage";
 import { writeJson } from "../../infrastructure/context/repository";
 import { COMMON_SCOPE } from "../../infrastructure/context/workspace";
@@ -356,13 +356,15 @@ async function main() {
   }
 
   for (const c of CASES) {
-    const knowledgeContext = await buildKnowledgeContext(c.boardId);
+    const boardContext = await buildBoardContext(
+      c.boardId,
+      (c.map ?? { actors: [], activities: [] }) as never,
+    );
     const started = Date.now();
     const res = await generate(
       c.boardId,
       [{ role: "user", content: c.message }],
-      knowledgeContext,
-      (c.map ?? { actors: [], activities: [] }) as never,
+      boardContext,
     );
     const mapJson = JSON.stringify(res.storyMap);
 

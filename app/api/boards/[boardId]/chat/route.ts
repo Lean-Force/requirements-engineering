@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isConfigured, generate } from "@/infrastructure/agent";
 import { loadStoryMap, applyChatTurn } from "@/infrastructure/storage";
-import { buildKnowledgeContext } from "@/infrastructure/context";
+import { buildBoardContext } from "@/infrastructure/context";
 import { withChatLock } from "@/infrastructure/chat-lock";
 import { emit } from "@/infrastructure/events";
 import { getBoard } from "@/infrastructure/boards";
@@ -64,10 +64,10 @@ export async function POST(request: Request, { params }: Params) {
       // ミューテックス通過後に読み直す(直前のターンの結果を正とする)
       const currentMap = await loadStoryMap(boardId);
 
-      // 知識 + 共通知識 + 確定マップ + 現在のマップを system prompt へ全文注入する
-      // (会話メッセージはユーザーの発話のまま手を加えない)
-      const knowledgeContext = await buildKnowledgeContext(boardId);
-      const parsed = await generate(boardId, messages, knowledgeContext, currentMap);
+      // 標準コンテキストブロック(業務一覧 + 知識 + 共通 + 確定マップ + 現在のマップ)を
+      // system prompt へ注入する(会話メッセージはユーザーの発話のまま手を加えない)
+      const boardContext = await buildBoardContext(boardId, currentMap);
+      const parsed = await generate(boardId, messages, boardContext);
 
       // AI 出力を保存してよい形へ整える(正規化・確定要素の保護・表示順の引き継ぎ)。
       // 手順の順序は domain.applyAiUpdate に閉じている。

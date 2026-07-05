@@ -7,6 +7,7 @@
 export {
   acceptBoardProposal,
   addSource,
+  buildBoardContext,
   buildKnowledgeContext,
   deleteEntry,
   deleteSource,
