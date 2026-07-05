@@ -7,6 +7,8 @@
 export {
   acceptBoardProposal,
   addSource,
+  applyReextraction,
+  applySource,
   buildBoardContext,
   buildKnowledgeContext,
   deleteEntry,
@@ -18,6 +20,8 @@ export {
   getSourceEntries,
   getSourceMarkdown,
   proposeEntryRevision,
+  recordBoardProposal,
+  recordConflicts,
   reextractSource,
   updateEntry,
   setSourceEnabled,

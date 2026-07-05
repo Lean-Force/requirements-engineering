@@ -1,4 +1,4 @@
-// LLM ゲートウェイの入出力型(index.ts と fake.ts が共有する)。
+// LLM ゲートウェイの入出力型。
 import type { KnowledgeCategory } from "@/contracts";
 
 /** 資料から抽出されたドメイン知識 1 件(保存前の形) */

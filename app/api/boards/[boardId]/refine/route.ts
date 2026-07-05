@@ -15,13 +15,6 @@ interface Params {
 // 付箋(行動 / ストーリー)の AI 校正。マップは変更しない(提案を返すだけ)ため
 // チャットのミューテックスは通さない。
 export async function POST(request: Request, { params }: Params) {
-  if (!isConfigured()) {
-    return NextResponse.json(
-      { error: "LLM が未設定です。サーバーの環境変数を確認してください。" },
-      { status: 500 },
-    );
-  }
-
   try {
     await getBoard(params.boardId);
   } catch {
@@ -45,6 +38,13 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json(
       { error: "kind(action | story)と text が必要です" },
       { status: 400 },
+    );
+  }
+
+  if (!isConfigured()) {
+    return NextResponse.json(
+      { error: "LLM が未設定です。サーバーの環境変数を確認してください。" },
+      { status: 500 },
     );
   }
 

@@ -25,16 +25,6 @@ interface Params {
 export async function POST(request: Request, { params }: Params) {
   const { boardId } = params;
 
-  if (!isConfigured()) {
-    return NextResponse.json(
-      {
-        error:
-          "LLM が未設定です。CLAUDE_CODE_USE_BEDROCK=1(+ AWS 認証)または ANTHROPIC_API_KEY を設定してサーバーを再起動してください。",
-      },
-      { status: 500 },
-    );
-  }
-
   try {
     await getBoard(boardId);
   } catch {
@@ -56,6 +46,18 @@ export async function POST(request: Request, { params }: Params) {
   if (!Array.isArray(messages) || messages.length === 0) {
     return NextResponse.json({ error: "messages が空です" }, { status: 400 });
   }
+
+  // 入力の妥当性を先に返し、接続設定の問題は最後に 500 で返す
+  if (!isConfigured()) {
+    return NextResponse.json(
+      {
+        error:
+          "LLM が未設定です。CLAUDE_CODE_USE_BEDROCK=1(+ AWS 認証)または ANTHROPIC_API_KEY を設定してサーバーを再起動してください。",
+      },
+      { status: 500 },
+    );
+  }
+
 
   // 同じボードを共有するメンバーの AI ターンは到着順に直列処理する
   return withChatLock(boardId, async () => {

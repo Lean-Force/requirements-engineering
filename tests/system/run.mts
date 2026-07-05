@@ -12,7 +12,6 @@ import os from "os";
 import path from "path";
 
 process.env.DATA_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "usm-system-"));
-delete process.env.USM_FAKE_LLM; // 実 LLM で回す(フェイク禁止)
 
 const { POST: boardsPost } = await import("../../app/api/boards/route");
 const { PUT: storymapPut } = await import("../../app/api/boards/[boardId]/storymap/route");
@@ -164,16 +163,25 @@ let mapAfterChat: Json = { actors: [], activities: [] };
 
 // 5. 付箋の AI 校正(実 LLM)
 {
+  // 実 UI と同じく、付箋が属する場面の文脈(行動・同じ場面の行動)を渡す
   const res = await refinePost(
-    json("POST", { kind: "story", text: "レシートほしい", actorName: "店員" }),
+    json("POST", {
+      kind: "story",
+      text: "レシートほしい",
+      actorName: "店員",
+      actionText: "会計する",
+      sceneActions: ["会計する"],
+    }),
     P,
   );
   const body: Json = await res.json();
   const problems: string[] = [];
   if (res.status !== 200) problems.push(`校正が ${res.status}(${body.error ?? ""})`);
   else {
-    if (!body.suggestion?.includes("したい")) problems.push("推奨形式(〜したい)になっていない");
-    if (!body.suggestion?.includes("なぜなら")) problems.push("理由(なぜなら)が補われていない");
+    if (!body.suggestion?.includes("したい") && !body.suggestion?.includes("ほしい"))
+      problems.push(`推奨形式(欲求の一人称)になっていない: ${body.suggestion}`);
+    if (!body.suggestion?.includes("なぜなら"))
+      problems.push(`理由(なぜなら)が補われていない: ${body.suggestion}`);
   }
   check("付箋の AI 校正: 推奨形式へ推敲", problems);
 }

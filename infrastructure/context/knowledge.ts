@@ -31,7 +31,14 @@ import type {
   KnowledgeState,
   SourceMeta,
 } from "@/contracts";
-import { detectConflicts, detectNewBusiness, extractKnowledgeMulti, reviseEntry } from "../agent";
+import {
+  detectConflicts,
+  detectNewBusiness,
+  extractKnowledgeMulti,
+  isConfigured,
+  reviseEntry,
+} from "../agent";
+import type { DetectedBusiness, DetectedConflict, ExtractedEntry } from "../agent";
 import { createBoard, listBoards } from "../boards";
 import { isSupportedFile, parseFile } from "./parse";
 import {
@@ -188,7 +195,20 @@ export async function addSource(
       `ドメイン知識を抽出できませんでした: ${fileName}(内容を確認してください)`,
     );
   }
+  return applySource(boardId, fileName, buffer, extracted);
+}
 
+/**
+ * 抽出済みエントリを資料として適用する(LLM を呼ばない後段)。
+ * 同名は資料の更新(✍️ 修正済みは保持)、スコープ方針の強制、矛盾・新業務スキャン
+ * の呼び出しまでを担う。テストはここへリテラルの抽出結果を渡して検証する。
+ */
+export async function applySource(
+  boardId: string | null,
+  fileName: string,
+  buffer: Buffer,
+  extracted: ExtractedEntry[],
+): Promise<KnowledgeState> {
   const scope = ownerScope(boardId);
   const sources = await readSources(scope);
   let entries = await readEntries(scope);
@@ -253,9 +273,23 @@ export async function reextractSource(
   if (extracted.length === 0) {
     throw new Error(`ドメイン知識を抽出できませんでした: ${meta.fileName}`);
   }
+  return applyReextraction(boardId, sourceId, extracted);
+}
 
-  // このソース由来のエントリを差し替える。ただし人が(AI と協働で)直した
-  // エントリ(edited)は再抽出で上書きしない(知識版の確定ロック)。
+/**
+ * 再抽出結果を適用する(LLM を呼ばない後段)。
+ * 人が(AI と協働で)直したエントリ(edited)は上書きしない(知識版の確定ロック)。
+ */
+export async function applyReextraction(
+  boardId: string | null,
+  sourceId: string,
+  extracted: ExtractedEntry[],
+): Promise<KnowledgeState> {
+  const scope = ownerScope(boardId);
+  const sources = await readSources(scope);
+  const meta = sources.find((s) => s.id === sourceId);
+  if (!meta) throw new Error("指定の資料が見つかりません");
+
   const all = await readEntries(scope);
   const kept = all.filter((e) => e.sourceId === sourceId && e.edited);
   const entries = all.filter((e) => e.sourceId !== sourceId);
@@ -336,7 +370,8 @@ async function scanConflicts(
   fileName: string,
   newEntries: KnowledgeEntry[],
 ): Promise<void> {
-  const scope = ownerScope(boardId);
+  // LLM 未設定(ローカルのユニットテスト等)では検出しない
+  if (!isConfigured()) return;
   try {
     // 既存知識: このビューから見える、当該資料「以外」のエントリ(出典ラベル付き)
     const { labelOf, entries } = await view(boardId);
@@ -357,30 +392,13 @@ async function scanConflicts(
       if (snippet) blocks.push(`[出典: 確定済みマップ(この業務の合意)] ${snippet}`);
     }
 
-    // この資料に関する既存の矛盾は洗い直す(解消済みの残骸を残さない)
-    const remaining = (await readConflicts(scope)).filter(
-      (c) => c.newSourceId !== sourceId,
-    );
     if (blocks.length === 0 || newEntries.length === 0) {
-      await writeJson(conflictsFile(scope), remaining);
+      await recordConflicts(boardId, sourceId, fileName, []);
       return;
     }
-
     const newText = newEntries.map((e) => `${e.title}: ${e.content}`).join("\n");
     const detected = await detectConflicts(fileName, newText, blocks.join("\n"));
-    const labelToId = new Map([...labelOf].map(([id, label]) => [label, id]));
-    const conflicts: KnowledgeConflict[] = detected.map((d) => ({
-      id: newId(),
-      detectedAt: new Date().toISOString(),
-      topic: d.topic,
-      newSource: fileName,
-      newClaim: d.newClaim,
-      existingSource: d.existingSource,
-      existingClaim: d.existingClaim,
-      newSourceId: sourceId,
-      existingSourceId: labelToId.get(d.existingSource),
-    }));
-    await writeJson(conflictsFile(scope), [...remaining, ...conflicts]);
+    await recordConflicts(boardId, sourceId, fileName, detected);
   } catch (err) {
     console.warn(
       JSON.stringify({
@@ -391,6 +409,36 @@ async function scanConflicts(
       }),
     );
   }
+}
+
+/**
+ * 検出済みの矛盾を永続化する(LLM を呼ばない後段)。
+ * この資料に関する既存の矛盾は洗い直し、既存側の出典ラベルを id に解決する。
+ */
+export async function recordConflicts(
+  boardId: string | null,
+  sourceId: string,
+  fileName: string,
+  detected: DetectedConflict[],
+): Promise<void> {
+  const scope = ownerScope(boardId);
+  const remaining = (await readConflicts(scope)).filter(
+    (c) => c.newSourceId !== sourceId,
+  );
+  const { labelOf } = await view(boardId);
+  const labelToId = new Map([...labelOf].map(([id, label]) => [label, id]));
+  const conflicts: KnowledgeConflict[] = detected.map((d) => ({
+    id: newId(),
+    detectedAt: new Date().toISOString(),
+    topic: d.topic,
+    newSource: fileName,
+    newClaim: d.newClaim,
+    existingSource: d.existingSource,
+    existingClaim: d.existingClaim,
+    newSourceId: sourceId,
+    existingSourceId: labelToId.get(d.existingSource),
+  }));
+  await writeJson(conflictsFile(scope), [...remaining, ...conflicts]);
 }
 
 /** 矛盾を解決済みにする(一覧から消す) */
@@ -422,13 +470,15 @@ async function scanNewBusiness(
   fileName: string,
   newEntries: KnowledgeEntry[],
 ): Promise<void> {
-  const scope = ownerScope(boardId);
+  // LLM 未設定(ローカルのユニットテスト等)では検知しない
+  if (!isConfigured()) return;
   try {
-    const remaining = (await readProposals(scope)).filter(
-      (p) => p.sourceId !== sourceId,
-    );
     if (newEntries.length === 0) {
-      await writeJson(proposalsFile(scope), remaining);
+      await recordBoardProposal(boardId, sourceId, fileName, {
+        isNewBusiness: false,
+        name: "",
+        reason: "",
+      });
       return;
     }
     const boards = await listBoards();
@@ -442,17 +492,7 @@ async function scanNewBusiness(
       intake,
       await buildBoardContext(boardId),
     );
-    if (detected.isNewBusiness && detected.name.trim()) {
-      remaining.push({
-        id: newId(),
-        detectedAt: new Date().toISOString(),
-        sourceId,
-        fileName,
-        name: detected.name.trim(),
-        reason: detected.reason,
-      });
-    }
-    await writeJson(proposalsFile(scope), remaining);
+    await recordBoardProposal(boardId, sourceId, fileName, detected);
   } catch (err) {
     console.warn(
       JSON.stringify({
@@ -463,6 +503,33 @@ async function scanNewBusiness(
       }),
     );
   }
+}
+
+/**
+ * 新業務の判定結果を提案として永続化する(LLM を呼ばない後段)。
+ * この資料の既存提案は洗い直す。isNewBusiness = false は提案なしとして記録。
+ */
+export async function recordBoardProposal(
+  boardId: string | null,
+  sourceId: string,
+  fileName: string,
+  detected: DetectedBusiness,
+): Promise<void> {
+  const scope = ownerScope(boardId);
+  const remaining = (await readProposals(scope)).filter(
+    (p) => p.sourceId !== sourceId,
+  );
+  if (detected.isNewBusiness && detected.name.trim()) {
+    remaining.push({
+      id: newId(),
+      detectedAt: new Date().toISOString(),
+      sourceId,
+      fileName,
+      name: detected.name.trim(),
+      reason: detected.reason,
+    });
+  }
+  await writeJson(proposalsFile(scope), remaining);
 }
 
 /**
