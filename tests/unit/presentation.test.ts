@@ -9,13 +9,15 @@ import os from "os";
 import path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createBoard } from "@/infrastructure/boards";
+import { createBoard, deleteBoard, renameBoard } from "@/infrastructure/boards";
 import {
   addSource,
   buildBoardContext,
   buildKnowledgeContext,
+  getSourceEntries,
   reextractSource,
   setSourceEnabled,
+  updateEntry,
 } from "@/infrastructure/context";
 import { saveStoryMap } from "@/infrastructure/storage";
 
@@ -163,5 +165,104 @@ describe("AI への提示内容(レベル2: system prompt 注入)", () => {
     // 共通ビュー(null)では業務一覧と知識のみで、マップは入らない
     const commonBlock = await buildBoardContext(null);
     expect(commonBlock).not.toContain("# 現在の User Story Map");
+  });
+
+});
+
+describe("更新が注入内容へ反映される(鮮度)", () => {
+  it("マップを編集して保存すると、現在の USM セクションが新しくなる", async () => {
+    const mapWith = (text: string) => ({
+      actors: [{ id: "a1", name: "店員" }],
+      activities: [
+        { id: "act1", actions: [{ id: "ac1", actorId: "a1", text, stories: [] }] },
+      ],
+    });
+    await saveStoryMap(A, mapWith("旧しい行動"));
+    expect(await buildBoardContext(A)).toContain("旧しい行動");
+
+    await saveStoryMap(A, mapWith("新しい行動"));
+    const block = await buildBoardContext(A);
+    expect(block).toContain("新しい行動");
+    expect(block).not.toContain("旧しい行動");
+  });
+
+  it("エントリを編集して保存すると、注入の本文が差し替わる", async () => {
+    const state = await addSource(A, "設計.txt", Buffer.from("KB|flows|承認ルール|1,000万円超は部長承認|false"));
+    const { entries } = await getSourceEntries(A, state.sources[0].id);
+    await updateEntry(A, state.sources[0].id, entries[0].id, {
+      title: "承認ルール",
+      content: "2億円超は役員承認",
+      common: false,
+    });
+
+    const block = await buildBoardContext(A);
+    expect(block).toContain("2億円超は役員承認");
+    expect(block).not.toContain("1,000万円超は部長承認");
+  });
+
+  it("同名資料の再アップロードで注入が新しい内容に置き換わる(修正済みは残る)", async () => {
+    const first = await addSource(A, "設計.txt", Buffer.from([
+      "KB|flows|旧ルール|旧の内容|false",
+      "KB|flows|直したルール|人が直す前|false",
+    ].join("\n")));
+    const { entries } = await getSourceEntries(A, first.sources[0].id);
+    const edited = entries.find((e) => e.title === "直したルール")!;
+    await updateEntry(A, first.sources[0].id, edited.id, {
+      title: "直したルール",
+      content: "人が直した内容",
+      common: false,
+    });
+
+    await addSource(A, "設計.txt", Buffer.from("KB|flows|新ルール|新の内容|false"));
+    const block = await buildBoardContext(A);
+    expect(block).toContain("新の内容"); // 改訂版が入る
+    expect(block).not.toContain("旧の内容"); // 未編集の旧エントリは消える
+    expect(block).toContain("人が直した内容"); // ✍️ 修正済みは保持される
+  });
+
+  it("ボード名を変えると、業務一覧と合意済みマップの見出しが追従する", async () => {
+    await saveStoryMap(A, {
+      actors: [{ id: "a1", name: "店員" }],
+      activities: [
+        {
+          id: "act1",
+          actions: [
+            { id: "ac1", actorId: "a1", text: "会計する", fixed: true, stories: [] },
+          ],
+        },
+      ],
+    });
+    expect(await buildBoardContext(B)).toContain("## 業務: 業務A");
+
+    await renameBoard(A, "改名後の業務");
+    const block = await buildBoardContext(B);
+    expect(block).toContain("- 改名後の業務");
+    expect(block).toContain("## 業務: 改名後の業務");
+    expect(block).not.toContain("業務A");
+  });
+
+  it("ボードを削除すると、業務一覧・共通知識・確定マップが注入から消える", async () => {
+    // 業務A: 共通知識 + 確定マップを持つ
+    await addSource(A, "用語.txt", Buffer.from("KB|terms|Aの用語|定義|true"));
+    await saveStoryMap(A, {
+      actors: [{ id: "a1", name: "店員" }],
+      activities: [
+        {
+          id: "act1",
+          actions: [
+            { id: "ac1", actorId: "a1", text: "会計する", fixed: true, stories: [] },
+          ],
+        },
+      ],
+    });
+    let block = await buildBoardContext(B);
+    expect(block).toContain("Aの用語");
+    expect(block).toContain("## 業務: 業務A");
+
+    await deleteBoard(A);
+    block = await buildBoardContext(B);
+    expect(block).not.toContain("- 業務A");
+    expect(block).not.toContain("Aの用語"); // ボード由来の共通知識も消える
+    expect(block).not.toContain("## 業務: 業務A"); // 確定マップ断片も掃除される
   });
 });
