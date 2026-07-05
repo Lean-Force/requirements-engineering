@@ -26,6 +26,12 @@ const { POST: proposalAccept } = await import(
   "../../app/api/boards/[boardId]/contexts/proposals/[proposalId]/accept/route"
 );
 const { POST: refinePost } = await import("../../app/api/boards/[boardId]/refine/route");
+const { GET: entriesGet } = await import(
+  "../../app/api/boards/[boardId]/contexts/[id]/entries/route"
+);
+const { POST: entryRevise } = await import(
+  "../../app/api/boards/[boardId]/contexts/[id]/entries/[entryId]/revise/route"
+);
 const { GET: knowledgeGet } = await import("../../app/api/knowledge/route");
 
 type Json = Record<string, any>;
@@ -62,6 +68,7 @@ const board: Json = await (await boardsPost(json("POST", { name: "送金処理" 
 const P = { params: { boardId: board.id } };
 check("ボード作成(ルート)", board.id ? [] : ["ボードが作成されない"]);
 
+let mainSourceId = "";
 // 2. 資料の取り込み(実抽出 + スコープ自動振り分け + 矛盾/新業務スキャン)
 const DOC = `# 送金業務 設計メモ
 
@@ -80,6 +87,7 @@ const DOC = `# 送金業務 設計メモ
   if (res.status !== 200) problems.push(`取り込みが ${res.status}(${state.error ?? ""})`);
   else {
     if (state.sources.length !== 1) problems.push("資料が 1 件にならない");
+    mainSourceId = state.sources[0]?.id ?? "";
     const count = (c: string) => state.categories.find((x: Json) => x.category === c)?.count ?? 0;
     if (count("flows") < 1) problems.push("承認ルール(flows)が抽出されていない");
     if (count("terms") < 1) problems.push("用語(terms)が抽出されていない");
@@ -186,6 +194,30 @@ let mapAfterChat: Json = { actors: [], activities: [] };
   check("付箋の AI 校正: 推奨形式へ推敲", problems);
 }
 
+// 5.5 エントリの AI 修正案(実 LLM): 指示 + 原資料グラウンディング
+{
+  const listed: Json = await (
+    await entriesGet(json("GET"), { params: { boardId: board.id, id: mainSourceId } })
+  ).json();
+  const rule = listed.entries?.find((e: Json) => `${e.title}${e.content}`.includes("1,000万"));
+  const problems: string[] = [];
+  if (!rule) problems.push("承認ルールのエントリが見つからない");
+  else {
+    const res = await entryRevise(
+      json("POST", { instruction: "規程改定があった。閾値を2億円、承認者を役員に直して。" }),
+      { params: { boardId: board.id, id: mainSourceId, entryId: rule.id } },
+    );
+    const body: Json = await res.json();
+    if (res.status !== 200) problems.push(`修正案が ${res.status}(${body.error ?? ""})`);
+    else {
+      if (!body.content?.includes("2億")) problems.push(`閾値が反映されていない: ${body.content}`);
+      if (!body.content?.includes("役員")) problems.push(`承認者が反映されていない: ${body.content}`);
+      if (!body.note) problems.push("note(修正理由)が無い");
+    }
+  }
+  check("エントリの AI 修正案: 指示どおりの修正 + 理由", problems);
+}
+
 // 6. 矛盾検出(実 LLM): 改定規程を取り込むと食い違いが検出される
 {
   const res = await contextsPost(
@@ -244,5 +276,5 @@ let mapAfterChat: Json = { actors: [], activities: [] };
 }
 
 await fs.rm(process.env.DATA_DIR!, { recursive: true, force: true });
-console.log(`\n${7 - failed}/7 passed`);
+console.log(`\n${8 - failed}/8 passed`);
 process.exit(failed > 0 ? 1 : 0);
