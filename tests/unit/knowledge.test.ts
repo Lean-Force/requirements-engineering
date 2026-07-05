@@ -11,9 +11,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createBoard } from "@/infrastructure/boards";
 import {
+  acceptBoardProposal,
   addSource,
   deleteEntry,
   deleteSource,
+  dismissBoardProposal,
   dismissConflict,
   getCategoryMarkdown,
   getKnowledgeState,
@@ -369,5 +371,59 @@ describe("鮮度(同名資料の更新)と矛盾検出", () => {
     );
     expect(state.sources).toHaveLength(2); // 取り込みは成功
     expect(state.conflicts).toEqual([]);
+  });
+});
+
+describe("新しい業務の検知とボード作成提案", () => {
+  const PROPOSAL_DOC =
+    'KB|flows|口座開設の審査|PROPOSE_BOARD_JSON:{"name":"口座開設","reason":"既存業務と異なる独立した業務のフローが記載されている"}|false';
+
+  it("取り込みで新業務が検知されると提案が state に載る", async () => {
+    const state = await addSource(BOARD, "口座開設フロー.txt", Buffer.from(PROPOSAL_DOC));
+    expect(state.proposals).toHaveLength(1);
+    expect(state.proposals[0].name).toBe("口座開設");
+    expect(state.proposals[0].fileName).toBe("口座開設フロー.txt");
+  });
+
+  it("承認するとボードが作られ、資料・知識・原資料が新ボードへ移る", async () => {
+    const state = await addSource(BOARD, "口座開設フロー.txt", Buffer.from(PROPOSAL_DOC));
+    const { board, state: after } = await acceptBoardProposal(BOARD, state.proposals[0].id);
+
+    // ボードが作成されている
+    const { listBoards } = await import("@/infrastructure/boards");
+    expect((await listBoards()).some((b) => b.id === board.id && b.name === "口座開設")).toBe(true);
+
+    // 元スコープから資料と提案が消える
+    expect(after.sources).toHaveLength(0);
+    expect(after.proposals).toHaveLength(0);
+    await expect(fs.access(skillPath(BOARD, "kb-flows"))).rejects.toThrow();
+
+    // 新ボードに資料・知識・skill・原資料がある
+    const moved = await getKnowledgeState(board.id);
+    expect(moved.sources.map((s) => s.fileName)).toEqual(["口座開設フロー.txt"]);
+    expect(moved.categories.find((c) => c.category === "flows")?.count).toBe(1);
+    await expect(fs.access(skillPath(board.id, "kb-flows"))).resolves.toBeUndefined();
+    await expect(
+      fs.access(originalPath(board.id, moved.sources[0].id, "口座開設フロー.txt")),
+    ).resolves.toBeUndefined();
+  });
+
+  it("却下すると提案だけが消える(資料は残る)", async () => {
+    const state = await addSource(BOARD, "口座開設フロー.txt", Buffer.from(PROPOSAL_DOC));
+    const after = await dismissBoardProposal(BOARD, state.proposals[0].id);
+    expect(after.proposals).toHaveLength(0);
+    expect(after.sources).toHaveLength(1);
+  });
+
+  it("資料を削除すると関連する提案も消える", async () => {
+    const state = await addSource(BOARD, "口座開設フロー.txt", Buffer.from(PROPOSAL_DOC));
+    expect(state.proposals).toHaveLength(1);
+    const after = await deleteSource(BOARD, state.sources[0].id);
+    expect(after.proposals).toHaveLength(0);
+  });
+
+  it("既存業務の範囲の資料では提案されない", async () => {
+    const state = await addSource(BOARD, "補足.txt", Buffer.from(DOC_A));
+    expect(state.proposals).toHaveLength(0);
   });
 });

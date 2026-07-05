@@ -17,3 +17,13 @@ export interface DetectedConflict {
   existingSource: string;
   existingClaim: string;
 }
+
+/** 新しい業務の検知結果 */
+export interface DetectedBusiness {
+  /** 既存のどの業務でもない、新しい業務の資料か */
+  isNewBusiness: boolean;
+  /** 業務名の候補(isNewBusiness = false のときは空文字) */
+  name: string;
+  /** 判定理由(1〜2文) */
+  reason: string;
+}

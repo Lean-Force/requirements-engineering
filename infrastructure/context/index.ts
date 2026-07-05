@@ -5,9 +5,11 @@
 //   parse.ts      … ファイル → Markdown 変換
 //   workspace.ts  … データ置き場の解決
 export {
+  acceptBoardProposal,
   addSource,
   deleteEntry,
   deleteSource,
+  dismissBoardProposal,
   dismissConflict,
   getCategoryMarkdown,
   getKnowledgeState,

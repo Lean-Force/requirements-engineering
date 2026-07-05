@@ -34,6 +34,7 @@ import type { StoryMap } from "@/domain";
 import { dataRoot, workspaceDir } from "../context/workspace";
 import { boardToolsServer } from "./board-tools";
 import {
+  BUSINESS_DETECT_SYSTEM_PROMPT,
   CONFLICT_DETECT_SYSTEM_PROMPT,
   ENTRY_REVISE_SYSTEM_PROMPT,
   EXTRACT_CATEGORY_DEFS,
@@ -45,6 +46,7 @@ import {
 } from "./prompts";
 import {
   fakeDetectConflicts,
+  fakeDetectNewBusiness,
   fakeExtract,
   fakeGenerate,
   fakeRefine,
@@ -52,6 +54,7 @@ import {
   isFakeLlm,
 } from "./fake";
 import {
+  BUSINESS_DETECT_SCHEMA,
   CHAT_OUTPUT_SCHEMA,
   CONFLICT_SCHEMA,
   ENTRY_REVISE_SCHEMA,
@@ -258,8 +261,8 @@ export async function refineCard(
 
 // ---- ドメイン知識の抽出 -----------------------------------------------------
 
-import type { DetectedConflict, ExtractedEntry } from "./types";
-export type { DetectedConflict, ExtractedEntry } from "./types";
+import type { DetectedBusiness, DetectedConflict, ExtractedEntry } from "./types";
+export type { DetectedBusiness, DetectedConflict, ExtractedEntry } from "./types";
 
 /**
  * 資料(Markdown 化済み)からドメイン知識エントリを抽出する(ツールなし 1 ターン)。
@@ -545,6 +548,66 @@ ${existingBlocks}`,
     throw new Error(`矛盾検出に失敗しました: ${errors}`);
   }
   throw new Error("矛盾検出で有効な応答が得られませんでした");
+}
+
+// ---- 新業務の検知 -------------------------------------------------------------
+
+/**
+ * 取り込んだ資料が「既存のどの業務でもない新しい業務」かを判定する(ツールなし 1 ターン)。
+ * 迷ったら提案しない方針(プロンプト側)。
+ */
+export async function detectNewBusiness(
+  fileName: string,
+  entriesText: string,
+  existingBoards: string[],
+  intake: string,
+): Promise<DetectedBusiness> {
+  if (isFakeLlm()) return fakeDetectNewBusiness(entriesText);
+  await fs.mkdir(dataRoot(), { recursive: true });
+  const q = query({
+    prompt: `# 取り込み先
+${intake}
+
+# 既存の業務(ボード)一覧
+${existingBoards.map((b) => `- ${b}`).join("\n") || "(なし)"}
+
+# 取り込んだ資料: ${fileName}(抽出された知識)
+
+${entriesText}`,
+    options: {
+      model: process.env.ANTHROPIC_MODEL || undefined,
+      cwd: dataRoot(),
+      systemPrompt: BUSINESS_DETECT_SYSTEM_PROMPT,
+      settingSources: [],
+      allowedTools: [],
+      maxTurns: 4,
+      outputFormat: { type: "json_schema", schema: BUSINESS_DETECT_SCHEMA },
+    },
+  });
+
+  for await (const message of q) {
+    if (message.type !== "result") continue;
+    if (message.subtype === "success") {
+      console.log(
+        JSON.stringify({
+          at: new Date().toISOString(),
+          kind: "business-detect-usage",
+          fileName,
+          usage: message.usage,
+          costUsd: message.total_cost_usd,
+        }),
+      );
+      const output = message.structured_output as DetectedBusiness | undefined;
+      if (!output) throw new Error("業務判定の結果が得られませんでした");
+      return output;
+    }
+    const errors =
+      "errors" in message && Array.isArray(message.errors)
+        ? message.errors.join(" / ")
+        : message.subtype;
+    throw new Error(`業務判定に失敗しました: ${errors}`);
+  }
+  throw new Error("業務判定で有効な応答が得られませんでした");
 }
 
 // ---- 内部 ----------------------------------------------------------------

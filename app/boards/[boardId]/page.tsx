@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Board, { type PickTarget } from "@/ui/Board";
 import PanZoom from "@/ui/PanZoom";
 import ChatPanel from "@/ui/ChatPanel";
@@ -23,7 +24,7 @@ import type {
   StoryMapVersionMeta,
 } from "@/contracts";
 
-const EMPTY_KNOWLEDGE: KnowledgeState = { sources: [], categories: [], conflicts: [] };
+const EMPTY_KNOWLEDGE: KnowledgeState = { sources: [], categories: [], conflicts: [], proposals: [] };
 
 interface Props {
   params: { boardId: string };
@@ -66,8 +67,11 @@ export default function BoardPage({ params }: Props) {
   // SSE 由来の再取得が自分の進行中の操作を上書きしないためのガード
   const loadingRef = useRef(false);
   // ?bootstrap=1 付きで開かれたら、取り込み済み知識から叩き台を自動生成する
+  const router = useRouter();
   const bootstrapRef = useRef(false);
 
+  // マウント時だけでなく、SPA 内のボード間遷移(コンポーネント再利用)でも
+  // ?bootstrap=1 を拾えるよう boardId の変化で再評価する
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("bootstrap") === "1") {
@@ -75,7 +79,7 @@ export default function BoardPage({ params }: Props) {
       // リロードで再生成されないよう URL からフラグを消す
       window.history.replaceState(null, "", window.location.pathname);
     }
-  }, []);
+  }, [boardId]);
 
   // 次回 / を開いたときにこのボードへ直行できるよう控える
   useEffect(() => {
@@ -86,8 +90,11 @@ export default function BoardPage({ params }: Props) {
     }
   }, [boardId]);
 
-  // 初回ロード:保存済みセッション + 知識ベースを取得
+  // 初回ロード:保存済みセッション + 知識ベースを取得。
+  // ボード間遷移(コンポーネント再利用)でも読み直すため、開始時に ready を戻す
+  // (叩き台の自動生成はロード完了後に発火させる)。
   useEffect(() => {
+    setReady(false);
     fetch(`${api}/session`)
       .then(async (r) => {
         if (!r.ok) {
@@ -99,9 +106,13 @@ export default function BoardPage({ params }: Props) {
       .then((s) => {
         if (!s) return;
         setBoard(s.board);
-        setStoryMap(s.storyMap);
-        setMessages(s.messages ?? []);
         setVersions(s.versions ?? []);
+        // 自分の AI ターンが進行中なら、古いセッションで会話とマップを
+        // 上書きしない(StrictMode の二重実行や遅延レスポンス対策)
+        if (!loadingRef.current) {
+          setStoryMap(s.storyMap);
+          setMessages(s.messages ?? []);
+        }
       })
       .catch(() => {
         /* 取得失敗時は初期状態のまま */
@@ -423,6 +434,42 @@ export default function BoardPage({ params }: Props) {
     [api],
   );
 
+  // ボード作成提案の承認(作成 + 資料移動)→ 新ボードの叩き台生成へ遷移
+  const acceptProposal = useCallback(
+    async (proposalId: string): Promise<string | null> => {
+      try {
+        const res = await fetch(`${api}/contexts/proposals/${proposalId}/accept`, {
+          method: "POST",
+        });
+        const data = await res.json();
+        if (!res.ok) return (data.error as string) ?? "作成に失敗しました";
+        const { board: created } = data as { board: BoardMeta };
+        router.push(`/boards/${created.id}?bootstrap=1`);
+        return null;
+      } catch (e) {
+        return e instanceof Error ? e.message : "作成に失敗しました";
+      }
+    },
+    [api, router],
+  );
+
+  const dismissProposal = useCallback(
+    async (proposalId: string): Promise<string | null> => {
+      try {
+        const res = await fetch(`${api}/contexts/proposals/${proposalId}`, {
+          method: "DELETE",
+        });
+        const data = await res.json();
+        if (!res.ok) return (data.error as string) ?? "操作に失敗しました";
+        setKnowledge(data as KnowledgeState);
+        return null;
+      } catch (e) {
+        return e instanceof Error ? e.message : "操作に失敗しました";
+      }
+    },
+    [api],
+  );
+
   // 資料 1 件のエントリ操作 API(一覧・AI 修正案・保存・削除)
   const entriesApiFor = useCallback(
     (sourceId: string) => {
@@ -553,6 +600,8 @@ export default function BoardPage({ params }: Props) {
             entriesApi={entriesApiFor}
             onEntriesState={setKnowledge}
             onDismissConflict={dismissConflict}
+            onAcceptProposal={acceptProposal}
+            onDismissProposal={dismissProposal}
             onClose={() => setShowContexts(false)}
           />
         )}

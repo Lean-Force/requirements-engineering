@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import type { KnowledgeState, SourceMeta } from "@/contracts";
 import ConflictList from "./ConflictList";
+import ProposalList from "./ProposalList";
 import SourceEntriesViewer, { type EntriesApi } from "./SourceEntriesViewer";
 
 interface Props {
@@ -22,6 +23,9 @@ interface Props {
   onEntriesState: (state: KnowledgeState) => void;
   /** 矛盾を解決済みにする */
   onDismissConflict: (id: string) => Promise<string | null>;
+  /** ボード作成提案の承認(作成 + 資料移動 + 叩き台へ遷移)/ 却下 */
+  onAcceptProposal: (id: string) => Promise<string | null>;
+  onDismissProposal: (id: string) => Promise<string | null>;
   onClose: () => void;
 }
 
@@ -41,6 +45,8 @@ export default function ContextPanel({
   entriesApi,
   onEntriesState,
   onDismissConflict,
+  onAcceptProposal,
+  onDismissProposal,
   onClose,
 }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
@@ -83,7 +89,7 @@ export default function ContextPanel({
   // 資料クリック → エントリ一覧(AI と協働で直せる)
   const openSource = (source: SourceMeta) => setEntriesFor(source);
 
-  const { sources, categories, conflicts } = knowledge;
+  const { sources, categories, conflicts, proposals } = knowledge;
   const totalEntries = categories.reduce((n, c) => n + c.count, 0);
 
   const renderSource = (s: SourceMeta) => (
@@ -183,6 +189,11 @@ export default function ContextPanel({
           </button>
         ))}
 
+        <ProposalList
+          proposals={proposals}
+          onAccept={onAcceptProposal}
+          onDismiss={onDismissProposal}
+        />
         <ConflictList conflicts={conflicts} onDismiss={onDismissConflict} />
 
         <div className="context-section-title">この業務の資料</div>

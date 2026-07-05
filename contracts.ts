@@ -145,12 +145,27 @@ export interface KnowledgeConflict {
   existingSourceId?: string;
 }
 
+/** 取り込み時に AI が検知した「新しい業務」のボード作成提案 */
+export interface BoardProposal {
+  id: string;
+  detectedAt: string;
+  /** 提案のもとになった資料 */
+  sourceId: string;
+  fileName: string;
+  /** AI が命名した業務名(ボード名の候補) */
+  name: string;
+  /** なぜ新しい業務と判定したか(1〜2文) */
+  reason: string;
+}
+
 /** /api/contexts 系のレスポンス(知識ベースの全体像) */
 export interface KnowledgeState {
   sources: SourceMeta[];
   categories: KnowledgeCategorySummary[];
   /** 未解消の矛盾(このビューの所有スコープ分) */
   conflicts: KnowledgeConflict[];
+  /** 未処理のボード作成提案(このビューの所有スコープ分) */
+  proposals: BoardProposal[];
 }
 
 /** サーバーから push されるボード同期イベント(SSE) */

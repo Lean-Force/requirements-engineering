@@ -20,6 +20,8 @@
 import { promises as fs } from "fs";
 import path from "path";
 import type {
+  BoardMeta,
+  BoardProposal,
   EntryPatch,
   EntryRevision,
   KnowledgeCategory,
@@ -29,12 +31,15 @@ import type {
   KnowledgeState,
   SourceMeta,
 } from "@/contracts";
-import { detectConflicts, extractKnowledgeMulti, reviseEntry } from "../agent";
-import { listBoards } from "../boards";
+import { detectConflicts, detectNewBusiness, extractKnowledgeMulti, reviseEntry } from "../agent";
+import { createBoard, listBoards } from "../boards";
 import { isSupportedFile, parseFile } from "./parse";
 import {
   conflictsFile,
+  moveSourceDir,
+  proposalsFile,
   readConflicts,
+  readProposals,
   readEntries,
   readOriginal,
   readSources,
@@ -94,12 +99,13 @@ async function view(boardId: string | null): Promise<{
 export async function getKnowledgeState(
   boardId: string | null,
 ): Promise<KnowledgeState> {
-  const [sources, conflicts, { labelOf, entries }] = await Promise.all([
+  const [sources, conflicts, proposals, { labelOf, entries }] = await Promise.all([
     readSources(ownerScope(boardId)),
     readConflicts(ownerScope(boardId)),
+    readProposals(ownerScope(boardId)),
     view(boardId),
   ]);
-  return { sources, categories: summarize(labelOf, entries), conflicts };
+  return { sources, categories: summarize(labelOf, entries), conflicts, proposals };
 }
 
 // ---- 取り込み・再抽出 -------------------------------------------------------
@@ -178,6 +184,7 @@ export async function addSource(
   await writeJson(knowledgeFile(scope), entries);
   await rerender(scope);
   await scanConflicts(boardId, id, fileName, [...kept, ...added]);
+  await scanNewBusiness(boardId, id, fileName, added);
   return getKnowledgeState(boardId);
 }
 
@@ -261,6 +268,10 @@ export async function deleteSource(
     (await readConflicts(scope)).filter(
       (c) => c.newSourceId !== sourceId && c.existingSourceId !== sourceId,
     ),
+  );
+  await writeJson(
+    proposalsFile(scope),
+    (await readProposals(scope)).filter((p) => p.sourceId !== sourceId),
   );
   await rerender(scope);
   return getKnowledgeState(boardId);
@@ -348,6 +359,127 @@ export async function dismissConflict(
   await writeJson(
     conflictsFile(scope),
     conflicts.filter((c) => c.id !== conflictId),
+  );
+  return getKnowledgeState(boardId);
+}
+
+// ---- 新しい業務の検知とボード作成提案 -----------------------------------------
+
+/**
+ * 取り込んだ資料が既存のどの業務でもない「新しい業務」なら、ボード作成の提案を
+ * 永続化する(承認・却下はユーザー)。検知失敗で取り込みは失敗させない。
+ */
+async function scanNewBusiness(
+  boardId: string | null,
+  sourceId: string,
+  fileName: string,
+  newEntries: KnowledgeEntry[],
+): Promise<void> {
+  const scope = ownerScope(boardId);
+  try {
+    const remaining = (await readProposals(scope)).filter(
+      (p) => p.sourceId !== sourceId,
+    );
+    if (newEntries.length === 0) {
+      await writeJson(proposalsFile(scope), remaining);
+      return;
+    }
+    const boards = await listBoards();
+    const intake =
+      boardId === null
+        ? "共通知識の管理画面(特定の業務に紐づかない)"
+        : `業務「${boards.find((b) => b.id === boardId)?.name ?? boardId}」のボード`;
+    const detected = await detectNewBusiness(
+      fileName,
+      newEntries.map((e) => `${e.title}: ${e.content}`).join("\n"),
+      boards.map((b) => b.name),
+      intake,
+    );
+    if (detected.isNewBusiness && detected.name.trim()) {
+      remaining.push({
+        id: newId(),
+        detectedAt: new Date().toISOString(),
+        sourceId,
+        fileName,
+        name: detected.name.trim(),
+        reason: detected.reason,
+      });
+    }
+    await writeJson(proposalsFile(scope), remaining);
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        at: new Date().toISOString(),
+        kind: "business-detect-failed",
+        fileName,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+}
+
+/**
+ * ボード作成提案を受け入れる: ボードを作成し、提案のもとになった資料
+ * (メタ・エントリ・原資料)を新しいボードへ移して skill を作り直す。
+ */
+export async function acceptBoardProposal(
+  boardId: string | null,
+  proposalId: string,
+): Promise<{ board: BoardMeta; state: KnowledgeState }> {
+  const scope = ownerScope(boardId);
+  const proposals = await readProposals(scope);
+  const proposal = proposals.find((p) => p.id === proposalId);
+  if (!proposal) throw new Error("指定の提案が見つかりません");
+
+  const board = await createBoard(proposal.name);
+
+  // 資料一式を新ボードへ移す(資料が既に消えていれば作成だけ行う)
+  const fromSources = await readSources(scope);
+  const meta = fromSources.find((s) => s.id === proposal.sourceId);
+  if (meta) {
+    const fromEntries = await readEntries(scope);
+    const own = fromEntries.filter((e) => e.sourceId === proposal.sourceId);
+    await moveSourceDir(scope, board.id, proposal.sourceId);
+    await writeJson(sourcesFile(board.id), [
+      ...(await readSources(board.id)),
+      meta,
+    ]);
+    await writeJson(knowledgeFile(board.id), [
+      ...(await readEntries(board.id)),
+      ...own,
+    ]);
+    await writeJson(
+      sourcesFile(scope),
+      fromSources.filter((s) => s.id !== proposal.sourceId),
+    );
+    await writeJson(
+      knowledgeFile(scope),
+      fromEntries.filter((e) => e.sourceId !== proposal.sourceId),
+    );
+    await renderSkills(board.id);
+    await rerender(scope);
+  }
+
+  await writeJson(
+    proposalsFile(scope),
+    proposals.filter((p) => p.id !== proposalId),
+  );
+  return { board, state: await getKnowledgeState(boardId) };
+}
+
+/** ボード作成提案を却下する */
+export async function dismissBoardProposal(
+  boardId: string | null,
+  proposalId: string,
+): Promise<KnowledgeState> {
+  const scope = ownerScope(boardId);
+  const proposals = await readProposals(scope);
+  if (!proposals.some((p) => p.id === proposalId)) {
+    throw new Error("指定の提案が見つかりません");
+  }
+  await writeJson(
+    proposalsFile(scope),
+    proposals.filter((p) => p.id !== proposalId),
   );
   return getKnowledgeState(boardId);
 }

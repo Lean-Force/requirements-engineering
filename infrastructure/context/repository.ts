@@ -3,7 +3,7 @@
 
 import { promises as fs } from "fs";
 import path from "path";
-import type { KnowledgeConflict, KnowledgeEntry, SourceMeta } from "@/contracts";
+import type { BoardProposal, KnowledgeConflict, KnowledgeEntry, SourceMeta } from "@/contracts";
 import { COMMON_SCOPE, workspaceDir } from "./workspace";
 
 export const sourcesFile = (scope: string) =>
@@ -16,6 +16,8 @@ export const skillsRoot = (scope: string) =>
   path.join(workspaceDir(scope), ".claude", "skills");
 export const conflictsFile = (scope: string) =>
   path.join(workspaceDir(scope), "conflicts.json");
+export const proposalsFile = (scope: string) =>
+  path.join(workspaceDir(scope), "board-proposals.json");
 
 async function readJson<T>(file: string, fallback: T): Promise<T> {
   try {
@@ -35,6 +37,8 @@ export const readSources = (scope: string) =>
 
 export const readConflicts = (scope: string) =>
   readJson<KnowledgeConflict[]>(conflictsFile(scope), []);
+export const readProposals = (scope: string) =>
+  readJson<BoardProposal[]>(proposalsFile(scope), []);
 
 /**
  * エントリの読み取り。common フラグが無い旧データは
@@ -68,4 +72,20 @@ export async function readOriginal(
 
 export async function removeSourceDir(scope: string, id: string): Promise<void> {
   await fs.rm(sourceDir(scope, id), { recursive: true, force: true });
+}
+
+/** 原資料ディレクトリをスコープ間で移動する(無ければスキップ = 旧データ耐性) */
+export async function moveSourceDir(
+  fromScope: string,
+  toScope: string,
+  id: string,
+): Promise<void> {
+  const dest = sourceDir(toScope, id);
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  try {
+    await fs.rename(sourceDir(fromScope, id), dest);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
 }

@@ -22,6 +22,9 @@ import {
 } from "@/app/api/boards/[boardId]/contexts/[id]/entries/[entryId]/route";
 import { POST as entryRevise } from "@/app/api/boards/[boardId]/contexts/[id]/entries/[entryId]/revise/route";
 import { DELETE as conflictDelete } from "@/app/api/boards/[boardId]/contexts/conflicts/[conflictId]/route";
+import { POST as proposalAccept } from "@/app/api/boards/[boardId]/contexts/proposals/[proposalId]/accept/route";
+import { DELETE as proposalDismiss } from "@/app/api/boards/[boardId]/contexts/proposals/[proposalId]/route";
+import { GET as boardsList } from "@/app/api/boards/route";
 import { POST as refinePost } from "@/app/api/boards/[boardId]/refine/route";
 import { GET as knowledgeGet } from "@/app/api/knowledge/route";
 import type { ChatResponse, KnowledgeState, SessionState } from "@/contracts";
@@ -368,5 +371,50 @@ describe("ボード管理ルート", () => {
     await expect(fs.access(path.join(tmp, "workspaces", BOARD))).rejects.toThrow();
     // このボード由来の確定マップも共通から消える
     await expect(fs.access(commonMaps)).rejects.toThrow();
+  });
+});
+
+describe("新業務検知 → ボード作成提案(ルート経由)", () => {
+  const PROPOSAL_DOC =
+    'KB|flows|口座開設の審査|PROPOSE_BOARD_JSON:{"name":"口座開設","reason":"独立した業務"}|false';
+
+  it("取り込み → 提案 → 承認でボードが作られ資料が移り、叩き台導線の情報が返る", async () => {
+    const state = (await (
+      await contextsPost(upload("口座開設フロー.txt", PROPOSAL_DOC), params())
+    ).json()) as KnowledgeState;
+    expect(state.proposals).toHaveLength(1);
+
+    const res = await proposalAccept(
+      json("POST"),
+      params({ proposalId: state.proposals[0].id }),
+    );
+    expect(res.status).toBe(200);
+    const { board, state: after } = (await res.json()) as {
+      board: { id: string; name: string };
+      state: KnowledgeState;
+    };
+    expect(board.name).toBe("口座開設");
+    expect(after.sources).toHaveLength(0);
+
+    // 新ボードが一覧に載り、資料が移っている
+    const boards = (await (await boardsList()).json()) as { id: string }[];
+    expect(boards.some((b) => b.id === board.id)).toBe(true);
+    const movedState = (await (
+      await contextsGet(json("GET"), { params: { boardId: board.id } })
+    ).json()) as KnowledgeState;
+    expect(movedState.sources.map((s) => s.fileName)).toEqual(["口座開設フロー.txt"]);
+  });
+
+  it("却下で提案だけが消える", async () => {
+    const state = (await (
+      await contextsPost(upload("口座開設フロー.txt", PROPOSAL_DOC), params())
+    ).json()) as KnowledgeState;
+    const res = await proposalDismiss(
+      json("DELETE"),
+      params({ proposalId: state.proposals[0].id }),
+    );
+    const after = (await res.json()) as KnowledgeState;
+    expect(after.proposals).toHaveLength(0);
+    expect(after.sources).toHaveLength(1);
   });
 });

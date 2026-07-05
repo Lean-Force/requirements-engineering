@@ -22,12 +22,10 @@ export default function BoardSwitcher({ current, onCurrentRenamed }: Props) {
   const [open, setOpen] = useState(false);
   const [boards, setBoards] = useState<BoardMeta[]>([]);
   const [name, setName] = useState("");
-  const [files, setFiles] = useState<File[]>([]);
-  const [phase, setPhase] = useState<"idle" | "creating" | "extracting">("idle");
+  const [phase, setPhase] = useState<"idle" | "creating">("idle");
   const [error, setError] = useState<string | null>(null);
   // 名前変更中のボード(行が入力欄に変わる)
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
 
   // 開くたびに最新の一覧を取得(他メンバーが作ったボードも見える)
   useEffect(() => {
@@ -123,30 +121,6 @@ export default function BoardSwitcher({ current, onCurrentRenamed }: Props) {
         return;
       }
       const board = data as BoardMeta;
-
-      // 資料が添付されていれば取り込み(知識抽出)→ 叩き台生成つきで遷移
-      if (files.length > 0) {
-        setPhase("extracting");
-        const form = new FormData();
-        for (const f of files) form.append("files", f);
-        const up = await fetch(`/api/boards/${board.id}/contexts`, {
-          method: "POST",
-          body: form,
-        });
-        if (!up.ok) {
-          // 取り込み失敗でもボードは開く(パネルから上げ直せる)
-          const err = await up.json().catch(() => ({}));
-          setError((err.error as string) ?? "資料の取り込みに失敗しました");
-          router.push(`/boards/${board.id}`);
-          return;
-        }
-        setName("");
-        setFiles([]);
-        setOpen(false);
-        router.push(`/boards/${board.id}?bootstrap=1`);
-        return;
-      }
-
       setName("");
       setOpen(false);
       router.push(`/boards/${board.id}`);
@@ -155,16 +129,9 @@ export default function BoardSwitcher({ current, onCurrentRenamed }: Props) {
     } finally {
       setPhase("idle");
     }
-  }, [name, files, phase, router]);
+  }, [name, phase, router]);
 
-  const createLabel =
-    phase === "creating"
-      ? "作成中…"
-      : phase === "extracting"
-        ? "知識を抽出中…"
-        : files.length > 0
-          ? `作成(資料${files.length}件 → 叩き台)`
-          : "作成";
+  const createLabel = phase === "creating" ? "作成中…" : "作成";
 
   return (
     <div className="board-switcher">
@@ -245,23 +212,6 @@ export default function BoardSwitcher({ current, onCurrentRenamed }: Props) {
                 {createLabel}
               </button>
             </div>
-            <button
-              className="board-switcher-attach"
-              onClick={() => fileInput.current?.click()}
-              disabled={phase !== "idle"}
-            >
-              📎 {files.length > 0
-                ? `資料 ${files.length} 件を添付済み(クリックで選び直し)`
-                : "資料を添付して叩き台まで作る(任意)"}
-            </button>
-            <input
-              ref={fileInput}
-              type="file"
-              multiple
-              accept=".xlsx,.xls,.csv,.pdf,.md,.txt"
-              style={{ display: "none" }}
-              onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
-            />
             {error && <div className="board-switcher-error">⚠️ {error}</div>}
             <Link
               href="/knowledge"

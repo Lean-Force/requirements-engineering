@@ -7,10 +7,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { KnowledgeState, SourceMeta } from "@/contracts";
+import { useRouter } from "next/navigation";
 import ConflictList from "@/ui/ConflictList";
+import ProposalList from "@/ui/ProposalList";
 import SourceEntriesViewer from "@/ui/SourceEntriesViewer";
 
-const EMPTY: KnowledgeState = { sources: [], categories: [], conflicts: [] };
+const EMPTY: KnowledgeState = { sources: [], categories: [], conflicts: [], proposals: [] };
 
 interface Viewer {
   title: string;
@@ -18,6 +20,7 @@ interface Viewer {
 }
 
 export default function KnowledgeAdminPage() {
+  const router = useRouter();
   const [knowledge, setKnowledge] = useState<KnowledgeState>(EMPTY);
   const [ready, setReady] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -118,6 +121,32 @@ export default function KnowledgeAdminPage() {
 
   const openSource = (source: SourceMeta) => setEntriesFor(source);
 
+  // ボード作成提案の承認 / 却下
+  const acceptProposal = useCallback(async (proposalId: string): Promise<string | null> => {
+    try {
+      const res = await fetch(`/api/knowledge/proposals/${proposalId}/accept`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) return (data.error as string) ?? "作成に失敗しました";
+      const { board } = data as { board: { id: string } };
+      router.push(`/boards/${board.id}?bootstrap=1`);
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : "作成に失敗しました";
+    }
+  }, [router]);
+
+  const dismissProposal = useCallback(async (proposalId: string): Promise<string | null> => {
+    try {
+      const res = await fetch(`/api/knowledge/proposals/${proposalId}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) return (data.error as string) ?? "操作に失敗しました";
+      setKnowledge(data as KnowledgeState);
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : "操作に失敗しました";
+    }
+  }, []);
+
   // 矛盾を解決済みにする
   const dismissConflict = useCallback(async (conflictId: string): Promise<string | null> => {
     try {
@@ -210,6 +239,11 @@ export default function KnowledgeAdminPage() {
           </button>
         ))}
 
+        <ProposalList
+          proposals={knowledge.proposals}
+          onAccept={acceptProposal}
+          onDismiss={dismissProposal}
+        />
         <ConflictList conflicts={knowledge.conflicts} onDismiss={dismissConflict} />
 
         <div className="context-section-title">ここで追加した資料</div>

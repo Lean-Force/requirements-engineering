@@ -15,7 +15,7 @@
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
-import { detectConflicts, extractKnowledge, extractKnowledgeMulti, generate } from "../../infrastructure/agent";
+import { detectConflicts, detectNewBusiness, extractKnowledge, extractKnowledgeMulti, generate } from "../../infrastructure/agent";
 import {
   knowledgeFile,
   sourcesFile,
@@ -327,6 +327,40 @@ async function main() {
     }
   }
 
+  // ---- 新業務の検知: 別業務は提案し、既存業務の補足は提案しない ----------------
+  {
+    const started = Date.now();
+    const [newBiz, sameBiz] = await Promise.all([
+      detectNewBusiness(
+        "口座開設フロー.xlsx",
+        [
+          "口座開設の審査: 本人確認書類の確認 → 反社チェック → 開設可否の判定。",
+          "口座開設の必要書類: 本人確認書類、印鑑届、マイナンバー確認書類。",
+        ].join("\n"),
+        ["送金処理"],
+        "共通知識の管理画面(特定の業務に紐づかない)",
+      ),
+      detectNewBusiness(
+        "送金補足.xlsx",
+        "送金の承認ルール補足: 1,000万円超は部長承認。休日受付は翌営業日扱い。",
+        ["送金処理"],
+        "業務「送金処理」のボード",
+      ),
+    ]);
+    const problems: string[] = [];
+    if (!newBiz.isNewBusiness) problems.push("別業務(口座開設)の資料が新業務と判定されていない");
+    else if (!newBiz.name.includes("口座")) problems.push(`業務名が資料に沿っていない: ${newBiz.name}`);
+    if (sameBiz.isNewBusiness) problems.push(`既存業務の補足資料を新業務と誤判定: ${sameBiz.name}`);
+    const secs = Math.round((Date.now() - started) / 1000);
+    if (problems.length === 0) {
+      console.log(`✅ PASS (${secs}s) 新業務の検知: 別業務は提案し、補足は提案しない`);
+    } else {
+      failed++;
+      console.log(`❌ FAIL (${secs}s) 新業務の検知: 別業務は提案し、補足は提案しない`);
+      for (const pr of problems) console.log(`   - ${pr}`);
+    }
+  }
+
   for (const c of CASES) {
     const skills = await prepareSkillsForChat(c.boardId);
     const started = Date.now();
@@ -367,7 +401,7 @@ async function main() {
   }
 
   await fs.rm(tmp, { recursive: true, force: true });
-  console.log(`\n${CASES.length + 2 - failed}/${CASES.length + 2} passed`);
+  console.log(`\n${CASES.length + 3 - failed}/${CASES.length + 3} passed`);
   process.exit(failed > 0 ? 1 : 0);
 }
 

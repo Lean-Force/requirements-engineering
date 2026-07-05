@@ -13,13 +13,14 @@
 //   KB|category|title|content|common      抽出: knowledge エントリ 1 件
 //   NOKB                        抽出: 空(「抽出できない」経路の検証用)
 //   CONFLICTS_JSON:[{...}]      矛盾検出: 検出結果の配列(エントリ content に埋め込める)
+//   PROPOSE_BOARD_JSON:{...}    新業務検知: {name, reason}(エントリ content に埋め込める)
 //   FAKESUGGEST:テキスト         付箋校正: 提案本文
 //   REVISE|title|content|common エントリ修正: 修正後の値
 
 import type { RefineRequest, RefineResponse } from "@/contracts";
 import type { StoryMap } from "@/domain";
 import type { ChatMessage, EntryRevision, KnowledgeCategory } from "@/contracts";
-import type { DetectedConflict, ExtractedEntry } from "./types";
+import type { DetectedBusiness, DetectedConflict, ExtractedEntry } from "./types";
 
 export const isFakeLlm = (): boolean => process.env.USM_FAKE_LLM === "1";
 
@@ -108,4 +109,17 @@ export function fakeReviseEntry(
     common: current.common,
     note: "(fake) 修正しました",
   };
+}
+
+export function fakeDetectNewBusiness(entriesText: string): DetectedBusiness {
+  for (const l of entriesText.split("\n")) {
+    const i = l.indexOf("PROPOSE_BOARD_JSON:");
+    if (i < 0) continue;
+    const { name, reason } = JSON.parse(l.slice(i + "PROPOSE_BOARD_JSON:".length)) as {
+      name: string;
+      reason: string;
+    };
+    return { isNewBusiness: true, name, reason };
+  }
+  return { isNewBusiness: false, name: "", reason: "(fake) 既存業務の範囲" };
 }

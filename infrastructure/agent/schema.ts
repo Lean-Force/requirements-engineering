@@ -94,3 +94,15 @@ export const CONFLICT_SCHEMA: Record<string, unknown> = {
     },
   },
 };
+
+/** 新業務検知の構造化出力スキーマ */
+export const BUSINESS_DETECT_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["isNewBusiness", "name", "reason"],
+  properties: {
+    isNewBusiness: { type: "boolean" },
+    name: { type: "string", description: "業務名の候補(false のときは空文字)" },
+    reason: { type: "string", description: "判定理由(日本語1〜2文)" },
+  },
+};
