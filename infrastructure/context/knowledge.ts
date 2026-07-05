@@ -585,7 +585,8 @@ export async function buildKnowledgeContext(boardId: string): Promise<string> {
   const renderGroup = (title: string, list: KnowledgeEntry[]): void => {
     const bodies = CATEGORIES.map((c) => {
       const body = renderCategoryBody(c.category, labelOf, list);
-      return body ? `## ${c.label}\n\n${body}` : null;
+      // エントリ見出し(##)をカテゴリ見出しの下の階層(###)に落とす
+      return body ? `## ${c.label}\n\n${body.replace(/^## /gm, "### ")}` : null;
     }).filter((b): b is string => b !== null);
     if (bodies.length > 0) sections.push(`# ${title}\n\n${bodies.join("\n\n")}`);
   };
