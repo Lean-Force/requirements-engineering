@@ -175,7 +175,7 @@ export default function KnowledgeAdminPage() {
   return (
     <div className="board-list-page">
       <header className="board-list-header">
-        <h1>共通知識(業務横断)</h1>
+        <h1>全業務の共通知識</h1>
         <span className="sub">
           すべてのボード(業務)から参照される知識の集約ビューです。資料の追加は
           各ボードの「ドメイン知識」パネルから行い、業務横断かどうかは AI が判定して

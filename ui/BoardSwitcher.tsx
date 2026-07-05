@@ -218,7 +218,7 @@ export default function BoardSwitcher({ current, onCurrentRenamed }: Props) {
               className="board-switcher-knowledge"
               onClick={() => setOpen(false)}
             >
-              🌐 共通知識を管理(業務横断)
+              🌐 全業務の共通知識(AI が自動で集約)
             </Link>
           </div>
         </>
