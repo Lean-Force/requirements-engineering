@@ -1,10 +1,10 @@
 "use client";
 
-// 共通知識(業務横断)の管理ページ。ボードを開かずに GLOBAL を整備する場所。
-// ここで追加した資料の知識はすべて共通になる。カテゴリには、各ボードの資料から
-// AI が共通へ振り分けた知識も合わせて表示される(それらの資料の管理は各ボード側)。
+// 共通知識(業務横断)の集約ビュー。資料のアップロード口は各ボードの知識パネル
+// だけ(一本化)で、共通かどうかは AI が抽出時に判定する。ここでは全業務から
+// 集まった共通知識の閲覧・編集・整備を行う(過去に直接追加された共通資料の管理も)。
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type { KnowledgeState, SourceMeta } from "@/contracts";
 import { useRouter } from "next/navigation";
@@ -23,13 +23,11 @@ export default function KnowledgeAdminPage() {
   const router = useRouter();
   const [knowledge, setKnowledge] = useState<KnowledgeState>(EMPTY);
   const [ready, setReady] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [reextracting, setReextracting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [viewer, setViewer] = useState<Viewer | null>(null);
   // エントリ編集ビューアを開いている資料
   const [entriesFor, setEntriesFor] = useState<SourceMeta | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
 
   const refetch = useCallback(async () => {
     try {
@@ -43,25 +41,6 @@ export default function KnowledgeAdminPage() {
   useEffect(() => {
     refetch().finally(() => setReady(true));
   }, [refetch]);
-
-  const upload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    setUploading(true);
-    setError(null);
-    const form = new FormData();
-    for (const f of Array.from(files)) form.append("files", f);
-    try {
-      const res = await fetch("/api/knowledge", { method: "POST", body: form });
-      const data = await res.json();
-      if (!res.ok) setError((data.error as string) ?? "アップロードに失敗しました");
-      else setKnowledge(data as KnowledgeState);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "アップロードに失敗しました");
-    } finally {
-      setUploading(false);
-      if (fileInput.current) fileInput.current.value = "";
-    }
-  };
 
   const toggle = async (id: string, enabled: boolean) => {
     setKnowledge((prev) => ({
@@ -198,31 +177,13 @@ export default function KnowledgeAdminPage() {
       <header className="board-list-header">
         <h1>共通知識(業務横断)</h1>
         <span className="sub">
-          すべてのボード(業務)から参照される知識です。各ボードの資料から AI が
-          自動で振り分けた知識もここに集まります —{" "}
+          すべてのボード(業務)から参照される知識の集約ビューです。資料の追加は
+          各ボードの「ドメイン知識」パネルから行い、業務横断かどうかは AI が判定して
+          ここへ集めます —{" "}
           <Link href="/">ボードへ戻る</Link>
         </span>
       </header>
 
-      <div className="board-create">
-        <button
-          className="context-upload"
-          onClick={() => fileInput.current?.click()}
-          disabled={uploading}
-        >
-          {uploading
-            ? "AI が知識を抽出しています…"
-            : "共通知識を追加(Excel / CSV / PDF / テキスト)"}
-        </button>
-        <input
-          ref={fileInput}
-          type="file"
-          multiple
-          accept=".xlsx,.xls,.csv,.pdf,.md,.txt"
-          style={{ display: "none" }}
-          onChange={(e) => upload(e.target.files)}
-        />
-      </div>
       {error && <div className="board-list-error">⚠️ {error}</div>}
 
       <div className="context-list knowledge-admin-list">
@@ -246,11 +207,13 @@ export default function KnowledgeAdminPage() {
         />
         <ConflictList conflicts={knowledge.conflicts} onDismiss={dismissConflict} />
 
-        <div className="context-section-title">ここで追加した資料</div>
-        {ready && sources.length === 0 && (
+        {sources.length > 0 && (
+          <div className="context-section-title">共通スコープの資料</div>
+        )}
+        {ready && totalEntries === 0 && sources.length === 0 && (
           <div className="context-empty">
-            ここで追加した資料はまだありません。全社用語集・組織図・共通規程などを
-            追加すると、すべてのボードの AI から参照されます。
+            まだ共通知識がありません。各ボードで全社用語集・組織図・共通規程などを
+            取り込むと、AI が業務横断と判定した知識がここに集まります。
           </div>
         )}
         {sources.map((s) => (
@@ -302,7 +265,6 @@ export default function KnowledgeAdminPage() {
         <SourceEntriesViewer
           title={entriesFor.fileName}
           api={entriesApiFor(entriesFor.id)}
-          commonFixed
           onState={setKnowledge}
           onClose={() => setEntriesFor(null)}
         />

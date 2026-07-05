@@ -4,6 +4,8 @@
 // エントリ単位で「AI と協働で直す」: 修正指示 → ✨ AI 修正案(原資料を根拠に生成、
 // 原文との食い違いは note で指摘)→ フィールドに反映 → 保存(edited = 再抽出でも上書きされない)。
 // 手で直接直して保存してもよい。
+// スコープ(業務横断か)の判断は AI の責務: トグルは置かず、変えたいときは修正指示に
+// 自然文で書く(例「これは全社共通のはず」)。AI が common を判定し直し、理由を note で返す。
 
 import { useEffect, useState } from "react";
 import type {
@@ -38,8 +40,6 @@ interface Props {
   /** ビューアの見出し(資料名) */
   title: string;
   api: EntriesApi;
-  /** 共通管理画面では常に共通なのでトグルを出さない */
-  commonFixed?: boolean;
   /** 保存・削除後の最新状態を親へ返す(パネルの件数表示の更新用) */
   onState: (state: KnowledgeState) => void;
   onClose: () => void;
@@ -55,7 +55,6 @@ interface Draft extends EntryPatch {
 export default function SourceEntriesViewer({
   title,
   api,
-  commonFixed,
   onState,
   onClose,
 }: Props) {
@@ -111,7 +110,7 @@ export default function SourceEntriesViewer({
     patchDraft(id, {
       title: r.title,
       content: r.content,
-      common: commonFixed ? true : r.common,
+      common: r.common,
       note: r.note,
       revising: false,
     });
@@ -206,20 +205,10 @@ export default function SourceEntriesViewer({
                       value={draft.content}
                       onChange={(ev) => patchDraft(e.id, { content: ev.target.value })}
                     />
-                    {!commonFixed && (
-                      <label className="entry-common-toggle">
-                        <input
-                          type="checkbox"
-                          checked={draft.common}
-                          onChange={(ev) => patchDraft(e.id, { common: ev.target.checked })}
-                        />
-                        業務横断の共通知識(全ボードから参照される)
-                      </label>
-                    )}
                     <div className="entry-revise">
                       <textarea
                         rows={2}
-                        placeholder="AI への修正指示(例: 閾値が違う。正しくは2億円。原文も確認して)"
+                        placeholder="AI への修正指示(例: 閾値が違う。正しくは2億円 / これは全社共通のはず)"
                         value={draft.instruction}
                         onChange={(ev) => patchDraft(e.id, { instruction: ev.target.value })}
                       />
