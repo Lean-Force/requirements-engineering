@@ -278,12 +278,13 @@ async function main() {
       problems.push(`5パスの再現率が1パスを下回った(取りこぼし: ${missed.join(", ")})`);
     if (multiHits.length < FACTS.length - 1)
       problems.push(`5パスの取りこぼしが多い: ${missed.join(", ")}`);
-    // common 自動判定(5 パス側 = 本番経路で確認)
-    const find = (kw: string) => multi.find((e) => (e.title + e.content).includes(kw));
-    const bsad = find("BSAD");
-    const rule = find("1,000万");
-    if (bsad && bsad.common !== true) problems.push("全社用語 BSAD が共通(common=true)になっていない");
-    if (rule && rule.common !== false) problems.push("業務の承認ルールが業務固有(common=false)になっていない");
+    // common 自動判定(5 パス側 = 本番経路で確認)。
+    // カテゴリ別バイアス: terms は共通寄り、flows は業務固有寄り。
+    // 観点重複で同じ事実が別カテゴリにも現れるため、カテゴリを絞って判定する
+    const bsad = multi.find((e) => e.category === "terms" && (e.title + e.content).includes("BSAD"));
+    const rule = multi.find((e) => e.category === "flows" && (e.title + e.content).includes("1,000万"));
+    if (bsad && bsad.common !== true) problems.push("全社用語 BSAD(terms)が共通になっていない");
+    if (rule && rule.common !== false) problems.push("業務の承認ルール(flows)が業務固有になっていない");
 
     const secs = Math.round((Date.now() - started) / 1000);
     if (problems.length === 0) {
