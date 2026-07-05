@@ -242,6 +242,7 @@ export async function extractKnowledge(
   fileName: string,
   markdown: string,
   focus?: KnowledgeCategory,
+  knowledgeContext = "",
 ): Promise<ExtractedEntry[]> {
   if (isFakeLlm()) return fakeExtract(markdown);
   // cwd に指定するため、まだ無ければ作る(無いと spawn に失敗する)。
@@ -252,7 +253,7 @@ export async function extractKnowledge(
     options: {
       model: process.env.ANTHROPIC_MODEL || undefined,
       cwd: dataRoot(),
-      systemPrompt: extractSystemPrompt(focus),
+      systemPrompt: withKnowledgeContext(extractSystemPrompt(focus), knowledgeContext),
       settingSources: [],
       allowedTools: [],
       maxTurns: 4,
@@ -301,6 +302,7 @@ export async function extractKnowledge(
 export async function extractKnowledgeMulti(
   fileName: string,
   markdown: string,
+  knowledgeContext = "",
 ): Promise<ExtractedEntry[]> {
   if (isFakeLlm()) return fakeExtract(markdown);
   // 資料をファイルとして置き、subagent に Read させる
@@ -331,7 +333,7 @@ export async function extractKnowledgeMulti(
             `extract-${c.category}`,
             {
               description: `${c.label}(${c.detail})の観点で資料 source.md から知識エントリを抽出する`,
-              prompt: extractSubagentPrompt(c.category),
+              prompt: withKnowledgeContext(extractSubagentPrompt(c.category), knowledgeContext),
               tools: ["Read"],
             },
           ]),
@@ -408,6 +410,7 @@ export async function reviseEntry(
   sourceMarkdown: string,
   current: { category: KnowledgeCategory; title: string; content: string; common: boolean },
   instruction: string,
+  knowledgeContext = "",
 ): Promise<EntryRevision> {
   if (isFakeLlm()) return fakeReviseEntry(current, instruction);
   await fs.mkdir(dataRoot(), { recursive: true });
@@ -427,7 +430,7 @@ ${instruction}`,
     options: {
       model: process.env.ANTHROPIC_MODEL || undefined,
       cwd: dataRoot(),
-      systemPrompt: ENTRY_REVISE_SYSTEM_PROMPT,
+      systemPrompt: withKnowledgeContext(ENTRY_REVISE_SYSTEM_PROMPT, knowledgeContext),
       settingSources: [],
       allowedTools: [],
       maxTurns: 4,
@@ -530,6 +533,7 @@ export async function detectNewBusiness(
   entriesText: string,
   existingBoards: string[],
   intake: string,
+  confirmedMaps = "",
 ): Promise<DetectedBusiness> {
   if (isFakeLlm()) return fakeDetectNewBusiness(entriesText);
   await fs.mkdir(dataRoot(), { recursive: true });
@@ -539,7 +543,7 @@ ${intake}
 
 # 既存の業務(ボード)一覧
 ${existingBoards.map((b) => `- ${b}`).join("\n") || "(なし)"}
-
+${confirmedMaps ? `\n# 各業務の合意済みマップ(業務の実態の判断材料)\n\n${confirmedMaps}\n` : ""}
 # 取り込んだ資料: ${fileName}(抽出された知識)
 
 ${entriesText}`,
@@ -580,6 +584,12 @@ ${entriesText}`,
 }
 
 // ---- 内部 ----------------------------------------------------------------
+
+/** system prompt の末尾に参照情報(既存知識)を付ける(空なら素通し) */
+function withKnowledgeContext(systemPrompt: string, knowledgeContext: string): string {
+  if (!knowledgeContext) return systemPrompt;
+  return `${systemPrompt}\n\n---\n\n以下は参照情報(既存のドメイン知識・共通知識・合意済みマップ)。\n表記・用語はこの正に合わせること。\n\n${knowledgeContext}`;
+}
 
 /**
  * ワークスペース外の読み取りを遮断する PreToolUse フック。

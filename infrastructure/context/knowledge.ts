@@ -149,8 +149,13 @@ export async function addSource(
   }
   const markdown = await toMarkdown(fileName, buffer);
 
-  // LLM でドメイン知識エントリへ分解する(失敗したら取り込み自体を失敗させる)
-  const extracted = await extractKnowledgeMulti(fileName, markdown);
+  // LLM でドメイン知識エントリへ分解する(失敗したら取り込み自体を失敗させる)。
+  // 既存知識をコンテキストとして渡し、表記・用語を既存の正に合わせる
+  const extracted = await extractKnowledgeMulti(
+    fileName,
+    markdown,
+    await buildKnowledgeContext(boardId),
+  );
   if (extracted.length === 0) {
     throw new Error(
       `ドメイン知識を抽出できませんでした: ${fileName}(内容を確認してください)`,
@@ -213,7 +218,11 @@ export async function reextractSource(
   const buffer = await readOriginal(scope, sourceId, meta.fileName);
   const markdown = await toMarkdown(meta.fileName, buffer);
 
-  const extracted = await extractKnowledgeMulti(meta.fileName, markdown);
+  const extracted = await extractKnowledgeMulti(
+    meta.fileName,
+    markdown,
+    await buildKnowledgeContext(boardId),
+  );
   if (extracted.length === 0) {
     throw new Error(`ドメイン知識を抽出できませんでした: ${meta.fileName}`);
   }
@@ -400,11 +409,13 @@ async function scanNewBusiness(
       boardId === null
         ? "共通スコープ(特定の業務に紐づかない)"
         : `業務「${boards.find((b) => b.id === boardId)?.name ?? boardId}」のボード`;
+    const maps = await confirmedMapSections();
     const detected = await detectNewBusiness(
       fileName,
       newEntries.map((e) => `${e.title}: ${e.content}`).join("\n"),
       boards.map((b) => b.name),
       intake,
+      maps.map((m) => `## 業務: ${m.name}\n${m.body}`).join("\n\n"),
     );
     if (detected.isNewBusiness && detected.name.trim()) {
       remaining.push({
@@ -527,7 +538,13 @@ export async function proposeEntryRevision(
 
   const buffer = await readOriginal(scope, sourceId, meta.fileName);
   const markdown = await toMarkdown(meta.fileName, buffer);
-  return reviseEntry(meta.fileName, markdown, entry, instruction);
+  return reviseEntry(
+    meta.fileName,
+    markdown,
+    entry,
+    instruction,
+    await buildKnowledgeContext(boardId),
+  );
 }
 
 /** エントリ 1 件を保存する(edited = true になり、以後の再抽出で上書きされない) */
@@ -576,7 +593,7 @@ export async function deleteEntry(
  * この業務の知識(業務固有)+ 業務横断の共通知識 + 各業務の確定済みマップ。
  * 無ければ空文字。出典(資料名)付きで、業務優先ルールの判断材料になる。
  */
-export async function buildKnowledgeContext(boardId: string): Promise<string> {
+export async function buildKnowledgeContext(boardId: string | null): Promise<string> {
   const { labelOf, entries } = await view(boardId);
   const own = entries.filter((e) => !e.common);
   const common = entries.filter((e) => e.common);
