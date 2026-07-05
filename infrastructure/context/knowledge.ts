@@ -69,6 +69,20 @@ import { COMMON_SCOPE, workspaceDir } from "./workspace";
 const ownerScope = (boardId: string | null): string => boardId ?? COMMON_SCOPE;
 
 /**
+ * スコープの方針(プロダクト決定): 用語(terms)とアクター(actors)は常に
+ * 業務横断(共通)。AI の判定やユーザー編集に関わらず保存時に強制する。
+ * 共通ビュー(boardId = null)由来のエントリも常に共通。
+ */
+const FORCED_COMMON: readonly KnowledgeCategory[] = ["terms", "actors"];
+function applyScopePolicy(
+  category: KnowledgeCategory,
+  common: boolean,
+  fromCommonView: boolean,
+): boolean {
+  return fromCommonView || FORCED_COMMON.includes(category) || common;
+}
+
+/**
  * ビューから見える知識を集める:
  *   - labelOf: 有効なソース id → 出典表示名(他スコープ由来の共通知識には「(共通)」を付す)
  *   - entries: 自スコープの全エントリ + 他スコープの共通エントリ
@@ -178,8 +192,7 @@ export async function addSource(
     id: newId(),
     sourceId: id,
     ...e,
-    // 共通スコープ(互換経路)への追加は業務が無いため必ず共通知識になる
-    common: boardId === null ? true : e.common,
+    common: applyScopePolicy(e.category, e.common, boardId === null),
   }));
   entries.push(...added);
   await writeJson(sourcesFile(scope), sources);
@@ -218,7 +231,12 @@ export async function reextractSource(
   const entries = all.filter((e) => e.sourceId !== sourceId);
   entries.push(...kept);
   for (const e of extracted) {
-    entries.push({ id: newId(), sourceId, ...e, common: boardId === null ? true : e.common });
+    entries.push({
+      id: newId(),
+      sourceId,
+      ...e,
+      common: applyScopePolicy(e.category, e.common, boardId === null),
+    });
   }
   meta.entryCount = kept.length + extracted.length;
   await writeJson(sourcesFile(scope), sources);
@@ -536,8 +554,7 @@ export async function updateEntry(
   if (!entry) throw new Error("指定のエントリが見つかりません");
   entry.title = patch.title;
   entry.content = patch.content;
-  // 共通スコープのエントリは常に共通のまま
-  entry.common = boardId === null ? true : patch.common;
+  entry.common = applyScopePolicy(entry.category, patch.common, boardId === null);
   entry.edited = true;
   await writeJson(knowledgeFile(scope), entries);
   await rerender(scope);

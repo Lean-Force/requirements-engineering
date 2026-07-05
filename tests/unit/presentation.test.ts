@@ -73,15 +73,15 @@ describe("AI への提示内容(レベル2)", () => {
   });
 
   it("description にはタイトル一覧と『いつ読むか』が入り、skill 仕様の 1024 字に収まる", async () => {
-    // 大量エントリで切り詰めも同時に検証する
+    // 大量エントリで切り詰めも同時に検証する(用語は常に共通のため flows で行う)
     const many = Array.from(
       { length: 60 },
-      (_, i) => `KB|terms|とても長い用語のタイトルその${i + 1}番目|定義${i}|false`,
+      (_, i) => `KB|flows|とても長いルールのタイトルその${i + 1}番目|内容${i}|false`,
     ).join("\n");
-    await addSource(A, "用語.txt", Buffer.from(many));
+    await addSource(A, "ルール.txt", Buffer.from(many));
 
-    const desc = descriptionOf(await readSkill(A, "kb-terms"));
-    expect(desc).toContain("とても長い用語のタイトルその1番目"); // タイトルが手がかりに入る
+    const desc = descriptionOf(await readSkill(A, "kb-flows"));
+    expect(desc).toContain("とても長いルールのタイトルその1番目"); // タイトルが手がかりに入る
     expect(desc).toContain("読むこと"); // いつ読むかの指示
     expect(desc).toContain("ほか"); // 切り詰め表示
     expect(desc.length).toBeLessThanOrEqual(1024); // skill 仕様の上限
@@ -118,19 +118,22 @@ describe("AI への提示内容(レベル2)", () => {
     expect(synced).not.toContain("旧定義");
   });
 
-  it("業務と共通の skill は名前と説明の書き出しで区別できる", async () => {
+  it("業務と共通の skill は名前と説明の書き出しで区別でき、用語は常に共通になる", async () => {
     await addSource(
       A,
       "設計書.txt",
-      Buffer.from(["KB|terms|業務用語|x|false", "KB|terms|共通用語|x|true"].join("\n")),
+      // 用語は common=false と抽出されても方針で共通に強制される
+      Buffer.from(["KB|flows|業務ルール|x|false", "KB|terms|用語|x|false"].join("\n")),
     );
     await prepareSkillsForChat(A);
 
-    expect(descriptionOf(await readSkill(A, "kb-terms"))).toContain(
+    expect(descriptionOf(await readSkill(A, "kb-flows"))).toContain(
       "この業務のドメイン知識",
     );
     expect(descriptionOf(await readSkill(A, "kb-common-terms"))).toContain(
       "業務横断の共通知識",
     );
+    // ボード側に kb-terms は作られない(用語は常に共通)
+    await expect(readSkill(A, "kb-terms")).rejects.toThrow();
   });
 });
