@@ -14,6 +14,7 @@ import {
   setActionFixed,
   setStoryFixed,
   setActivityStandalone,
+  setFlowName,
 } from "@/domain";
 import type { StoryMap } from "@/domain";
 
@@ -290,5 +291,53 @@ describe("随時(standalone)の場面 — 連続と非連続の区別", () => {
     const back = setActivityStandalone(moved, "一", false);
     expect(back.activities.map((a) => a.id)).toEqual(["二", "三", "一"]);
     expect(back.activities[2]).not.toHaveProperty("standalone");
+  });
+});
+
+describe("小さな流れ(flowName)のクラスタ化", () => {
+  const scene = (id: string, flowName?: string) => ({
+    id,
+    ...(flowName ? { flowName } : {}),
+    actions: [{ id: `ac-${id}`, actorId: "a1", text: id, stories: [] }],
+  });
+
+  it("normalize: 同じ流れの場面は初出順で隣接にまとまり、名前なしは単独で順序を保つ", () => {
+    const m = normalizeStoryMap({
+      actors: [{ id: "a1", name: "A" }],
+      activities: [
+        scene("受付1", "受付"),
+        scene("審査1", "審査"),
+        scene("受付2", "受付"), // 離れて置かれても受付群に寄る
+        scene("単独"),
+        scene("審査2", "審査"),
+      ],
+    });
+    expect(m.activities.map((a) => a.id)).toEqual(["受付1", "受付2", "審査1", "審査2", "単独"]);
+    expect(m.activities[0].flowName).toBe("受付");
+    expect(m.activities[4]).not.toHaveProperty("flowName");
+  });
+
+  it("随時の場面には flowName が付かない(正規化で除去)", () => {
+    const m = normalizeStoryMap({
+      actors: [{ id: "a1", name: "A" }],
+      activities: [{ ...scene("随時1", "受付"), standalone: true }],
+    });
+    expect(m.activities[0].standalone).toBe(true);
+    expect(m.activities[0]).not.toHaveProperty("flowName");
+  });
+
+  it("setFlowName: 場面群への命名・改名・解除(空文字)ができる", () => {
+    const base = normalizeStoryMap({
+      actors: [{ id: "a1", name: "A" }],
+      activities: [scene("一"), scene("二")],
+    });
+    const named = setFlowName(base, ["一", "二"], "受付");
+    expect(named.activities.map((a) => a.flowName)).toEqual(["受付", "受付"]);
+
+    const renamed = setFlowName(named, ["一", "二"], "受付・確認");
+    expect(renamed.activities[0].flowName).toBe("受付・確認");
+
+    const cleared = setFlowName(renamed, ["一", "二"], "  ");
+    expect(cleared.activities[0]).not.toHaveProperty("flowName");
   });
 });

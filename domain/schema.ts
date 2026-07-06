@@ -35,6 +35,11 @@ export const STORY_MAP_JSON_SCHEMA: Record<string, unknown> = {
             description:
               "時系列(ナラティブフロー)に属さない随時・例外・定期の場面は true。true の場面は配列の末尾に置く",
           },
+          flowName: {
+            type: "string",
+            description:
+              "バックボーン内の小さな流れの名前(例: 受付 / 審査・承認 / 実行・通知)。意味のまとまりごとに付け、同じ名前の場面は隣接させる。短い名詞。standalone の場面には付けない",
+          },
           actions: {
             type: "array",
             items: {

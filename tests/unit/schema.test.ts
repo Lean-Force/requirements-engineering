@@ -16,6 +16,7 @@ const FULL_SAMPLE: Required<Pick<StoryMap, "actors" | "activities">> = {
     {
       id: "act1",
       standalone: true, // 随時(時系列外)の場面
+      flowName: "受付", // 小さな流れの名前
       storyOrder: ["s1"], // ← AI スキーマからは意図的に除外(サーバー管理)
       actions: [
         {

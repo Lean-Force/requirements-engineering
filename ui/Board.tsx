@@ -126,6 +126,29 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
 
   // 随時(時系列外)の場面。正規化で末尾へまとまるため、最初の随時列の前に区切りを描く
   const firstStandalone = activities.findIndex((a) => a.standalone === true);
+
+  // 小さな流れ(flowName)のバンド: 連続する同名の場面群を 1 セグメントに。
+  // 名前なしは単独セグメント、随時はまとめて 1 セグメント(名前なし)。
+  type Segment = { key: string; name: string | null; ids: string[]; standalone: boolean };
+  const segments: Segment[] = [];
+  for (const a of activities) {
+    const last = segments[segments.length - 1];
+    if (a.standalone === true) {
+      if (last?.standalone) last.ids.push(a.id);
+      else segments.push({ key: a.id, name: null, ids: [a.id], standalone: true });
+    } else if (a.flowName && last && !last.standalone && last.name === a.flowName) {
+      last.ids.push(a.id);
+    } else {
+      segments.push({ key: a.id, name: a.flowName ?? null, ids: [a.id], standalone: false });
+    }
+  }
+  // バンド名の編集状態(key = セグメント先頭の場面 id)
+  const [flowEdit, setFlowEdit] = useState<{ key: string; value: string } | null>(null);
+  const commitFlowName = (seg: Segment) => {
+    if (!flowEdit) return;
+    onChange(domain.setFlowName(storyMap, seg.ids, flowEdit.value));
+    setFlowEdit(null);
+  };
   const flowDivider = (activity: (typeof activities)[number], label = false) =>
     activity.standalone === true && activities[firstStandalone]?.id === activity.id ? (
       <div className="flow-divider" key={`div-${activity.id}`}>
@@ -262,6 +285,46 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
 
       {/* ===== activity line(アクター行 × アクティビティ列) ===== */}
       <div className="activity-line">
+        {activities.length > 0 && segments.some((g) => !g.standalone) && (
+          <div className="flow-bands">
+            <div className="head-gutter" />
+            <div className="lane-flow">
+              {segments.map((seg) => (
+                <Fragment key={seg.key}>
+                  {seg.standalone && <div className="flow-divider" />}
+                  <div
+                    className={`flow-band${seg.standalone ? " standalone" : ""}${seg.name ? "" : " unnamed"}`}
+                    style={{ width: seg.ids.length * COL_W + (seg.ids.length - 1) * 12 }}
+                  >
+                    {seg.standalone ? (
+                      <span className="flow-band-name muted">随時・例外</span>
+                    ) : flowEdit?.key === seg.key ? (
+                      <input
+                        className="flow-band-input"
+                        autoFocus
+                        value={flowEdit.value}
+                        onChange={(e) => setFlowEdit({ key: seg.key, value: e.target.value })}
+                        onBlur={() => commitFlowName(seg)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitFlowName(seg);
+                          if (e.key === "Escape") setFlowEdit(null);
+                        }}
+                      />
+                    ) : (
+                      <button
+                        className="flow-band-name"
+                        title={seg.name ? "この流れの名前を変更" : "この場面群に流れの名前を付ける"}
+                        onClick={() => setFlowEdit({ key: seg.key, value: seg.name ?? "" })}
+                      >
+                        {seg.name ?? "＋ 流れに名前"}
+                      </button>
+                    )}
+                  </div>
+                </Fragment>
+              ))}
+            </div>
+          </div>
+        )}
         {activities.length > 0 && (
           <div className="activity-headers">
             <div className="head-gutter" />

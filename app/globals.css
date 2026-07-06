@@ -334,3 +334,14 @@ body,html{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
 .activity-head:hover .standalone-toggle{opacity:1}
 .standalone-toggle.on{opacity:1;border-style:solid;border-color:#94a3b8;background:#f1f5f9;color:#475569}
 .step-cell.standalone{background:repeating-linear-gradient(135deg,transparent,transparent 8px,rgba(100,116,139,.05) 8px,rgba(100,116,139,.05) 16px)}
+.flow-bands{display:flex;gap:12px;align-items:flex-end;margin-bottom:2px}
+.flow-bands .lane-flow{display:flex;gap:12px}
+.flow-band{flex:none;display:flex;align-items:center;justify-content:center;border-top:2px solid #94a3b8;border-radius:2px;padding-top:2px;min-height:18px}
+.flow-band.unnamed{border-top-style:dotted;border-top-color:var(--border)}
+.flow-band.standalone{border-top-style:dashed;border-top-color:#cbd5e1}
+.flow-band-name{border:none;background:transparent;font-size:11px;color:#475569;cursor:pointer;padding:0 6px;border-radius:6px}
+.flow-band-name:hover{background:#f1f5f9}
+.flow-band.unnamed .flow-band-name{color:transparent;transition:color .12s}
+.flow-band.unnamed:hover .flow-band-name{color:var(--muted)}
+.flow-band-name.muted{color:var(--muted);cursor:default}
+.flow-band-input{width:90%;border:1px solid var(--accent);border-radius:6px;font-size:11px;padding:1px 6px}

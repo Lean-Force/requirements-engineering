@@ -4,7 +4,10 @@ import { Given, When, Then } from "@cucumber/cucumber";
 import { expect } from "@playwright/test";
 import { UsmWorld, BASE_URL, E2E_DATA_DIR } from "../support/world";
 
-async function seedMap(world: UsmWorld, activities: { text: string; standalone?: boolean }[]) {
+async function seedMap(
+  world: UsmWorld,
+  activities: { text: string; standalone?: boolean; flowName?: string }[],
+) {
   const prev = process.env.DATA_DIR;
   process.env.DATA_DIR = E2E_DATA_DIR;
   try {
@@ -14,6 +17,7 @@ async function seedMap(world: UsmWorld, activities: { text: string; standalone?:
       activities: activities.map((a, i) => ({
         id: `act-${i}`,
         ...(a.standalone ? { standalone: true } : {}),
+        ...(a.flowName ? { flowName: a.flowName } : {}),
         actions: [{ id: `ac-${i}`, actorId: "a1", text: a.text, stories: [] }],
       })),
     });
@@ -79,3 +83,37 @@ When("場面 {string} を随時に切り替える", async function (this: UsmWor
     head.locator(".standalone-toggle").click(),
   ]);
 });
+
+Given(
+  "流れ {string} の場面 {string} と流れ {string} の場面 {string} があるマップ",
+  async function (this: UsmWorld, f1: string, t1: string, f2: string, t2: string) {
+    await seedMap(this, [
+      { text: t1, flowName: f1 },
+      { text: t2, flowName: f2 },
+    ]);
+  },
+);
+
+Then(
+  "流れバンド {string} と {string} が見える",
+  async function (this: UsmWorld, a: string, b: string) {
+    await expect(this.page.locator(".flow-band-name", { hasText: a })).toBeVisible();
+    await expect(this.page.locator(".flow-band-name", { hasText: b })).toBeVisible();
+  },
+);
+
+When(
+  "流れバンド {string} の名前を {string} に変える",
+  async function (this: UsmWorld, from: string, to: string) {
+    await this.page.locator(".flow-band-name", { hasText: from }).click();
+    const input = this.page.locator(".flow-band-input");
+    await input.fill(to);
+    await Promise.all([
+      this.page.waitForResponse(
+        (r) => /\/api\/boards\/[^/]+\/storymap$/.test(r.url()) && r.request().method() === "PUT",
+        { timeout: 15_000 },
+      ),
+      input.press("Enter"),
+    ]);
+  },
+);

@@ -94,7 +94,12 @@ function sceneLines(
     const body = actions
       .map((action) => actionLines(action, actorName, fixedOnly))
       .join("\n");
-    lines.push(`### 場面${i + 1}${activity.standalone ? "(随時・時系列外)" : ""}\n${body}`);
+    const tag = activity.standalone
+      ? "(随時・時系列外)"
+      : activity.flowName
+        ? `(流れ: ${activity.flowName})`
+        : "";
+    lines.push(`### 場面${i + 1}${tag}\n${body}`);
   });
   return lines;
 }

@@ -152,6 +152,13 @@ const CASES: EvalCase[] = [
     replyMustInclude: ["確定"],
   },
   {
+    name: "小さな流れ(flowName)でグループ化して生成する",
+    boardId: "eval-soukin",
+    message:
+      "送金業務のマップを作って。受付(依頼を受ける・内容を確認する)、審査・承認(承認を得る)、実行(送金を実行する・結果を通知する)の 3 つの小さな流れに分けて。",
+    mapMustInclude: ['"flowName"', "受付", "実行"],
+  },
+  {
     name: "随時の業務を standalone として時系列外に置く",
     boardId: "eval-soukin",
     map: {

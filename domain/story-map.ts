@@ -63,20 +63,50 @@ export function normalizeStoryMap(map: StoryMap): StoryMap {
       (id, i, arr) =>
         typeof id === "string" && validStoryIds.has(id) && arr.indexOf(id) === i,
     );
+    const flowName =
+      typeof activity.flowName === "string" ? activity.flowName.trim() : "";
     return {
       id: activity.id,
       actions,
-      // 随時フラグは true のときだけ保持(JSON を汚さない)
+      // 随時フラグは true のときだけ保持(JSON を汚さない)。随時に流れ名は付けない
       ...(activity.standalone === true ? { standalone: true as const } : {}),
+      ...(flowName && activity.standalone !== true ? { flowName } : {}),
       ...(storyOrder.length > 0 ? { storyOrder } : {}),
     };
   });
 
-  // 連続した流れ(時系列)を先に、随時・例外の場面を末尾にまとめる
-  // (それぞれの中では元の並び順を保つ。タイムラインの意味を決定的に守る)
+  // 連続した流れ(時系列)を先に、随時・例外の場面を末尾にまとめる。
+  // さらに連続側は「小さな流れ(flowName)」ごとに隣接へクラスタ化する
+  // (流れの初出順・流れ内の元順を保つ。名前なしの場面は単独の塊として扱う)。
   const flow = activities.filter((a) => a.standalone !== true);
   const standalone = activities.filter((a) => a.standalone === true);
-  return { actors, activities: [...flow, ...standalone] };
+  const order: string[] = [];
+  const buckets = new Map<string, typeof flow>();
+  flow.forEach((a, i) => {
+    const key = a.flowName ?? `__solo_${i}`;
+    if (!buckets.has(key)) {
+      buckets.set(key, []);
+      order.push(key);
+    }
+    buckets.get(key)!.push(a);
+  });
+  const clustered = order.flatMap((k) => buckets.get(k)!);
+  return { actors, activities: [...clustered, ...standalone] };
+}
+
+/** 指定の場面たちに「小さな流れ」の名前を付ける(空文字で外す)。正規化で隣接が保証される */
+export function setFlowName(
+  map: StoryMap,
+  activityIds: string[],
+  flowName: string,
+): StoryMap {
+  const ids = new Set(activityIds);
+  return normalizeStoryMap({
+    ...map,
+    activities: map.activities.map((a) =>
+      ids.has(a.id) ? { ...a, flowName: flowName.trim() || undefined } : a,
+    ),
+  });
 }
 
 /** 場面を「随時(時系列外)」⇄「連続の流れ」に切り替える(正規化で並びも追従) */
