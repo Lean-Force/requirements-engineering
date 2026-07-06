@@ -159,6 +159,38 @@ const CASES: EvalCase[] = [
     mapMustInclude: ['"flowName"', "受付", "実行"],
   },
   {
+    name: "確定ストーリーがあっても flowName の付与は拒まない",
+    boardId: "eval-soukin",
+    map: {
+      actors: [{ id: "actor-op", name: "オペレーター" }],
+      activities: [
+        {
+          id: "act-1",
+          actions: [
+            {
+              id: "action-1",
+              actorId: "actor-op",
+              text: "送金を受け付ける",
+              fixed: true,
+              stories: [
+                { id: "story-1", text: "オペレーターは内容を確認したい。なぜなら誤送金を防ぎたいからだ。", fixed: true },
+              ],
+            },
+          ],
+        },
+        {
+          id: "act-2",
+          actions: [
+            { id: "action-2", actorId: "actor-op", text: "送金を実行する", stories: [] },
+          ],
+        },
+      ],
+    },
+    message:
+      "場面を意味のまとまりごとに小さな流れに分けて、flowName を付けて。内容は変えないで。",
+    mapMustInclude: ['"flowName"', "オペレーターは内容を確認したい。なぜなら誤送金を防ぎたいからだ。"],
+  },
+  {
     name: "随時の業務を standalone として時系列外に置く",
     boardId: "eval-soukin",
     map: {
