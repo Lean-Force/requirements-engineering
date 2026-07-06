@@ -19,7 +19,7 @@ export { createActivity } from "./activity";
 
 // 問い合わせ
 export { actionOf, orderedStories } from "./activity";
-export { findActivity, findAction } from "./story-map";
+export { findActivity, findAction, setActivityStandalone } from "./story-map";
 
 // 集約への操作(UI からの唯一の変更入口)
 export {

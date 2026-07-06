@@ -38,7 +38,7 @@ body,html{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
 .activity-line,.step-cell,.story-line{display:flex;flex-direction:column;gap:8px}
 .story-line{margin-top:4px}
 .story-col{gap:6px}
-.activity-headers{display:flex;gap:12px;align-items:flex-end}
+.activity-headers{display:flex;gap:12px;align-items:flex-end;overflow:visible;padding-top:14px}
 .head-gutter{flex:0 0 110px;width:110px}
 .activity-head{flex:none;height:18px;display:flex;align-items:center;justify-content:center}
 .activity-head:hover .del-activity{opacity:1}
@@ -328,3 +328,9 @@ body,html{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
 .context-size.warn .context-size-bar div{background:#f59e0b}
 .context-size.danger .context-size-bar div{background:#ef4444}
 .context-size.danger span{color:#b91c1c}
+.flow-divider{flex:none;width:2px;align-self:stretch;border-left:2px dashed #cbd5e1;margin:0 6px;position:relative}
+.flow-divider-label{position:absolute;top:-18px;left:6px;white-space:nowrap;font-size:10px;color:var(--muted);background:var(--bg,#fff);padding:0 4px}
+.standalone-toggle{border:1px dashed var(--border);background:transparent;border-radius:8px;padding:1px 7px;font-size:10px;color:var(--muted);cursor:pointer;opacity:0;transition:opacity .12s;margin-right:4px}
+.activity-head:hover .standalone-toggle{opacity:1}
+.standalone-toggle.on{opacity:1;border-style:solid;border-color:#94a3b8;background:#f1f5f9;color:#475569}
+.step-cell.standalone{background:repeating-linear-gradient(135deg,transparent,transparent 8px,rgba(100,116,139,.05) 8px,rgba(100,116,139,.05) 16px)}

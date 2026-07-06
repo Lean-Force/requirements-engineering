@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import type { StoryMap } from "@/domain";
 import * as domain from "@/domain";
 import type { RefineRequest, RefineResponse } from "@/contracts";
@@ -123,6 +123,19 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
   // ドラッグ直後の click で編集モーダルが開かないようにするガード
   const justDragged = useRef(false);
   const [editor, setEditor] = useState<Editor | null>(null);
+
+  // 随時(時系列外)の場面。正規化で末尾へまとまるため、最初の随時列の前に区切りを描く
+  const firstStandalone = activities.findIndex((a) => a.standalone === true);
+  const flowDivider = (activity: (typeof activities)[number], label = false) =>
+    activity.standalone === true && activities[firstStandalone]?.id === activity.id ? (
+      <div className="flow-divider" key={`div-${activity.id}`}>
+        {label && <span className="flow-divider-label">随時・例外</span>}
+      </div>
+    ) : null;
+
+  const toggleStandalone = (activityId: string, standalone: boolean) => {
+    onChange(domain.setActivityStandalone(storyMap, activityId, standalone));
+  };
 
   const colorOf = (actorId: string) => {
     const i = actors.findIndex((a) => a.id === actorId);
@@ -254,15 +267,32 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
             <div className="head-gutter" />
             <div className="lane-flow">
               {activities.map((activity) => (
-                    <div className="activity-head" key={activity.id} style={{ width: COL_W }}>
-                      <button
-                        className="del-activity"
-                        title="この場面(列)を削除"
-                        onClick={() => removeActivity(activity.id)}
+                    <Fragment key={activity.id}>
+                      {flowDivider(activity, true)}
+                      <div
+                        className={`activity-head${activity.standalone ? " standalone" : ""}`}
+                        style={{ width: COL_W }}
                       >
-                        ×
-                      </button>
-                    </div>
+                        <button
+                          className={`standalone-toggle${activity.standalone ? " on" : ""}`}
+                          title={
+                            activity.standalone
+                              ? "随時(時系列外)の場面。クリックで流れに戻す"
+                              : "時系列の流れに属さない場面(随時・例外)にする"
+                          }
+                          onClick={() => toggleStandalone(activity.id, !activity.standalone)}
+                        >
+                          {activity.standalone ? "随時" : "→随時"}
+                        </button>
+                        <button
+                          className="del-activity"
+                          title="この場面(列)を削除"
+                          onClick={() => removeActivity(activity.id)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </Fragment>
                   ))}
                 </div>
               </div>
@@ -289,9 +319,10 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                     {activities.map((activity, gi) => {
                       const action = domain.actionOf(activity, actor.id);
                       return (
+                        <Fragment key={activity.id}>
+                        {flowDivider(activity)}
                         <div
-                          className="step-cell activity-cell"
-                          key={activity.id}
+                          className={`step-cell activity-cell${activity.standalone ? " standalone" : ""}`}
                           style={{ width: COL_W }}
                         >
                           {/* 途中挿入(この列の前に。ホバーで表示) */}
@@ -377,6 +408,7 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                             </button>
                           )}
                         </div>
+                        </Fragment>
                       );
                     })}
 
@@ -431,10 +463,11 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
             <div className="lane-label story-label">ストーリー</div>
             <div className="lane-flow">
               {activities.map((activity) => (
+                  <Fragment key={activity.id}>
+                    {flowDivider(activity)}
                     <div
-                      className="step-cell story-col"
+                      className={`step-cell story-col${activity.standalone ? " standalone" : ""}`}
                       data-activity-id={activity.id}
-                      key={activity.id}
                       style={{ width: COL_W }}
                     >
                       {/* 上: ストーリーカードを列の表示順(storyOrder)で縦積み。
@@ -616,6 +649,7 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                           </button>
                         ))}
                 </div>
+                  </Fragment>
               ))}
             </div>
           </div>

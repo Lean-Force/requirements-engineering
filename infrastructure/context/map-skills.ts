@@ -94,7 +94,7 @@ function sceneLines(
     const body = actions
       .map((action) => actionLines(action, actorName, fixedOnly))
       .join("\n");
-    lines.push(`### 場面${i + 1}\n${body}`);
+    lines.push(`### 場面${i + 1}${activity.standalone ? "(随時・時系列外)" : ""}\n${body}`);
   });
   return lines;
 }

@@ -66,11 +66,31 @@ export function normalizeStoryMap(map: StoryMap): StoryMap {
     return {
       id: activity.id,
       actions,
+      // 随時フラグは true のときだけ保持(JSON を汚さない)
+      ...(activity.standalone === true ? { standalone: true as const } : {}),
       ...(storyOrder.length > 0 ? { storyOrder } : {}),
     };
   });
 
-  return { actors, activities };
+  // 連続した流れ(時系列)を先に、随時・例外の場面を末尾にまとめる
+  // (それぞれの中では元の並び順を保つ。タイムラインの意味を決定的に守る)
+  const flow = activities.filter((a) => a.standalone !== true);
+  const standalone = activities.filter((a) => a.standalone === true);
+  return { actors, activities: [...flow, ...standalone] };
+}
+
+/** 場面を「随時(時系列外)」⇄「連続の流れ」に切り替える(正規化で並びも追従) */
+export function setActivityStandalone(
+  map: StoryMap,
+  activityId: string,
+  standalone: boolean,
+): StoryMap {
+  return normalizeStoryMap({
+    ...map,
+    activities: map.activities.map((a) =>
+      a.id === activityId ? { ...a, standalone } : a,
+    ),
+  });
 }
 
 // ---- 問い合わせ ----------------------------------------------------------

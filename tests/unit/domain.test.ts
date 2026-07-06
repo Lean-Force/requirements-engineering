@@ -13,6 +13,7 @@ import {
   reorderStoryInColumn,
   setActionFixed,
   setStoryFixed,
+  setActivityStandalone,
 } from "@/domain";
 import type { StoryMap } from "@/domain";
 
@@ -251,5 +252,43 @@ describe("applyAiUpdate(AI 出力の取り込みパイプライン)", () => {
     // 表示順: s4 先頭が維持され、消えた id は掃除済み・新規は末尾
     expect(columnIds(r, "act1")[0]).toBe("s4");
     expect(r.activities[0].storyOrder).not.toContain("s2");
+  });
+});
+
+describe("随時(standalone)の場面 — 連続と非連続の区別", () => {
+  const flow = (id: string) => ({
+    id,
+    actions: [{ id: `ac-${id}`, actorId: "a1", text: id, stories: [] }],
+  });
+
+  it("normalize: standalone は true のときだけ残り、随時は末尾へまとまる(安定順)", () => {
+    const m = normalizeStoryMap({
+      actors: [{ id: "a1", name: "A" }],
+      activities: [
+        { ...flow("随時1"), standalone: true },
+        flow("流れ1"),
+        { ...flow("流れ2"), standalone: false } as never,
+        { ...flow("随時2"), standalone: true },
+      ],
+    });
+    expect(m.activities.map((a) => a.id)).toEqual(["流れ1", "流れ2", "随時1", "随時2"]);
+    expect(m.activities[0]).not.toHaveProperty("standalone");
+    expect(m.activities[1]).not.toHaveProperty("standalone");
+    expect(m.activities[2].standalone).toBe(true);
+    expect(m.activities[3].standalone).toBe(true);
+  });
+
+  it("setActivityStandalone: 随時化で末尾へ、戻すと流れの並びへ復帰する", () => {
+    const base = normalizeStoryMap({
+      actors: [{ id: "a1", name: "A" }],
+      activities: [flow("一"), flow("二"), flow("三")],
+    });
+    const moved = setActivityStandalone(base, "ac-一".replace("ac-", ""), true);
+    expect(moved.activities.map((a) => a.id)).toEqual(["二", "三", "一"]);
+    expect(moved.activities[2].standalone).toBe(true);
+
+    const back = setActivityStandalone(moved, "一", false);
+    expect(back.activities.map((a) => a.id)).toEqual(["二", "三", "一"]);
+    expect(back.activities[2]).not.toHaveProperty("standalone");
   });
 });

@@ -152,6 +152,30 @@ const CASES: EvalCase[] = [
     replyMustInclude: ["確定"],
   },
   {
+    name: "随時の業務を standalone として時系列外に置く",
+    boardId: "eval-soukin",
+    map: {
+      actors: [{ id: "actor-op", name: "オペレーター" }],
+      activities: [
+        {
+          id: "act-1",
+          actions: [
+            { id: "action-1", actorId: "actor-op", text: "送金を受け付ける", stories: [] },
+          ],
+        },
+        {
+          id: "act-2",
+          actions: [
+            { id: "action-2", actorId: "actor-op", text: "送金を実行する", stories: [] },
+          ],
+        },
+      ],
+    },
+    message:
+      "「限度額変更の受付」を場面として追加して。これは送金の流れとは独立で、顧客からいつでも依頼が来る随時対応の業務です。",
+    mapMustInclude: ["限度額", '"standalone":true'],
+  },
+  {
     name: "他業務の合意済みマップを参照して答える",
     boardId: "eval-koza",
     message:

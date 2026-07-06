@@ -30,6 +30,11 @@ export const STORY_MAP_JSON_SCHEMA: Record<string, unknown> = {
         required: ["id", "actions"],
         properties: {
           id: { type: "string" },
+          standalone: {
+            type: "boolean",
+            description:
+              "時系列(ナラティブフロー)に属さない随時・例外・定期の場面は true。true の場面は配列の末尾に置く",
+          },
           actions: {
             type: "array",
             items: {
