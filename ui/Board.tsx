@@ -319,7 +319,7 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
       <div className="activity-line">
         {activities.length > 0 && segments.some((g) => !g.standalone) && (
           <div className="flow-bands">
-            <div className="head-gutter" />
+            <div className="head-gutter"><span className="flow-bands-label">Activities</span></div>
             <div className="lane-flow">
               {segments.map((seg) => (
                 <Fragment key={seg.key}>
@@ -551,8 +551,28 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
         </div>
       )}
 
-      {/* ===== story line(各アクティビティ列の下に、各アクターのストーリーを色分けで) ===== */}
-      {activities.length > 0 && (
+      {/* ===== story line(リリースセクション × アクティビティ列) ===== */}
+      {activities.length > 0 && (() => {
+        // リリースセクション定義（末尾に「未分類」）
+        type RelSection = { release: number | undefined; label: string };
+        const relSections: RelSection[] = [
+          ...releases.map((r, i) => ({ release: i as number | undefined, label: r.name })),
+          { release: undefined, label: "未分類" },
+        ];
+        const showLines = true;
+
+        // 各 activity のストーリーをリリースごとに事前分類
+        const matchRel = (sr: number | undefined, sec: RelSection) =>
+          sec.release === undefined
+            ? sr === undefined || (typeof sr === "number" && sr < 0)
+            : sr === sec.release;
+        const perActivity = activities.map((activity) => {
+          const all = domain.orderedStories(activity);
+          const groups = relSections.map((sec) => all.filter((p) => matchRel(p.story.release, sec)));
+          return { activity, all, groups };
+        });
+
+        return (
         <div className="story-line">
           <div className="lane">
             <div className="lane-label story-label">
@@ -582,163 +602,169 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                 </button>
               </div>
             </div>
-            <div className="lane-flow">
-              {activities.map((activity) => (
+            <div className="story-sections">
+              {relSections.map((sec, si) => {
+                const isLast = si === relSections.length - 1;
+                return (
+                <Fragment key={sec.release ?? "unassigned"}>
+                  <div className="lane-flow">
+                    {perActivity.map(({ activity, all, groups }) => {
+                      const sectionStories = groups[si];
+                      const sectionStart = groups.slice(0, si).reduce((sum, g) => sum + g.length, 0);
+                      return (
+                        <Fragment key={activity.id}>
+                          {flowDivider(activity)}
+                          <div
+                            className={`step-cell story-col${activity.standalone ? " standalone" : ""}${
+                              draggingStory?.activityId === activity.id ? " col-drop-zone" : ""
+                            }`}
+                            data-activity-id={activity.id}
+                            style={{ width: COL_W }}
+                            onDragOver={(e) => {
+                              if (!draggingStory || draggingStory.activityId !== activity.id) return;
+                              e.preventDefault();
+                              e.dataTransfer.dropEffect = "move";
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              if (!draggingStory || draggingStory.activityId !== activity.id) return;
+                              let map = storyMap;
+                              const dragged = all.find((x) => x.story.id === draggingStory.storyId);
+                              if (dragged && dragged.story.release !== sec.release) {
+                                map = domain.setStoryRelease(map, draggingStory.storyId, sec.release ?? -1);
+                              }
+                              onChange(domain.reorderStoryInColumn(map, activity.id, draggingStory.storyId, sectionStart + sectionStories.length));
+                              setDraggingStory(null);
+                              setDropHint(null);
+                            }}
+                          >
+                            {sectionStories.map((pair, localIdx) => {
+                              const { story: st, action } = pair;
+                              const c = colorOf(action.actorId);
+                              const displayIndex = sectionStart + localIdx;
+                              return (
+                                <div
+                                  key={st.id}
+                                  className={`story-card clickable${st.fixed ? " fixed" : ""}${
+                                    draggingStory?.storyId === st.id ? " dragging" : ""
+                                  }${
+                                    dropHint?.storyId === st.id
+                                      ? dropHint.after ? " drop-after" : " drop-before"
+                                      : ""
+                                  }`}
+                                  data-action-id={action.id}
+                                  data-release={st.release ?? -1}
+                                  title={st.fixed ? `🔒 確定済み: ${st.text}` : st.text}
+                                  style={{ background: c.bg, borderColor: c.border }}
+                                  draggable
+                                  onDragStart={(e) => {
+                                    e.dataTransfer.setData("text/plain", st.id);
+                                    e.dataTransfer.effectAllowed = "move";
+                                    setDraggingStory({ activityId: activity.id, storyId: st.id });
+                                  }}
+                                  onDragEnd={() => {
+                                    setDraggingStory(null);
+                                    setDropHint(null);
+                                    justDragged.current = true;
+                                    setTimeout(() => (justDragged.current = false), 150);
+                                  }}
+                                  onDragOver={(e) => {
+                                    if (!draggingStory || draggingStory.storyId === st.id || draggingStory.activityId !== activity.id) return;
+                                    e.preventDefault();
+                                    e.dataTransfer.dropEffect = "move";
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    const after = e.clientY > rect.top + rect.height / 2;
+                                    setDropHint((h) => h?.storyId === st.id && h.after === after ? h : { storyId: st.id, after });
+                                  }}
+                                  onDragLeave={() => setDropHint((h) => (h?.storyId === st.id ? null : h))}
+                                  onDrop={(e) => {
+                                    e.preventDefault();
+                                    if (!draggingStory || draggingStory.storyId === st.id || draggingStory.activityId !== activity.id) return;
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    const after = e.clientY > rect.top + rect.height / 2;
+                                    let map = storyMap;
+                                    const dragged = all.find((x) => x.story.id === draggingStory.storyId);
+                                    if (dragged && dragged.story.release !== sec.release) {
+                                      map = domain.setStoryRelease(map, draggingStory.storyId, sec.release ?? -1);
+                                    }
+                                    onChange(domain.reorderStoryInColumn(map, activity.id, draggingStory.storyId, displayIndex + (after ? 1 : 0)));
+                                    setDraggingStory(null);
+                                    setDropHint(null);
+                                  }}
+                                  onClick={() => {
+                                    if (justDragged.current) return;
+                                    setEditor({
+                                      mode: "story-edit",
+                                      activityId: activity.id,
+                                      actionId: action.id,
+                                      storyId: st.id,
+                                      initial: st.text,
+                                      initialFixed: st.fixed === true,
+                                    });
+                                  }}
+                                >
+                                  <span style={{ fontSize: noteFontSize(st.text) }}>
+                                    {st.fixed && <span className="story-lock">🔒</span>}
+                                    {st.text}
+                                  </span>
+                                  {onPickTarget && (
+                                    <button className="pick-story" title="このストーリーをチャットの対象にする"
+                                      onClick={(e) => { e.stopPropagation(); onPickTarget({ kind: "story", id: st.id, text: st.text }); }}>
+                                      📌
+                                    </button>
+                                  )}
+                                  {!st.fixed && (
+                                    <button className="del-story" title="このストーリーを削除"
+                                      onClick={(e) => { e.stopPropagation(); removeStoryCard(activity.id, action.id, st.id); }}>
+                                      ×
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </Fragment>
+                      );
+                    })}
+                  </div>
+                  {showLines && !isLast && (
+                    <div
+                      className={`release-line-full${draggingStory ? " drop-zone" : ""}`}
+                      onDragOver={(e) => {
+                        if (!draggingStory) return;
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (!draggingStory) return;
+                        const nextSec = relSections[si + 1];
+                        if (!nextSec) return;
+                        const pa = perActivity.find((p) => p.activity.id === draggingStory.activityId);
+                        if (!pa) return;
+                        let map = storyMap;
+                        const dragged = pa.all.find((x) => x.story.id === draggingStory.storyId);
+                        if (dragged && dragged.story.release !== nextSec.release) {
+                          map = domain.setStoryRelease(map, draggingStory.storyId, nextSec.release ?? -1);
+                        }
+                        const nextStart = pa.groups.slice(0, si + 1).reduce((sum, g) => sum + g.length, 0);
+                        onChange(domain.reorderStoryInColumn(map, draggingStory.activityId, draggingStory.storyId, nextStart));
+                        setDraggingStory(null);
+                        setDropHint(null);
+                      }}
+                    >
+                      <span className="release-line-label">{sec.label}</span>
+                    </div>
+                  )}
+                </Fragment>
+              );
+              })}
+              {/* ストーリー追加行 */}
+              <div className="lane-flow">
+                {activities.map((activity) => (
                   <Fragment key={activity.id}>
                     {flowDivider(activity)}
-                    <div
-                      className={`step-cell story-col${activity.standalone ? " standalone" : ""}`}
-                      data-activity-id={activity.id}
-                      style={{ width: COL_W }}
-                    >
-                      {/* 上: ストーリーカードを列の表示順(storyOrder)で縦積み。
-                          D&D は同じ列(場面)内の並び替えのみで、所属(行動)と色は変えない */}
-                      {domain.orderedStories(activity).map(({ story: st, action }, displayIndex) => {
-                        const c = colorOf(action.actorId);
-                        return (
-                            <div
-                              key={st.id}
-                              className={`story-card clickable${st.fixed ? " fixed" : ""}${
-                                draggingStory?.storyId === st.id ? " dragging" : ""
-                              }${
-                                dropHint?.storyId === st.id
-                                  ? dropHint.after
-                                    ? " drop-after"
-                                    : " drop-before"
-                                  : ""
-                              }`}
-                              data-action-id={action.id}
-                              data-release={st.release ?? 0}
-                              title={st.fixed ? `🔒 確定済み: ${st.text}` : st.text}
-                              style={{ background: c.bg, borderColor: c.border }}
-                              draggable
-                              onDragStart={(e) => {
-                                // Safari / Firefox は setData しないとドラッグが開始されない
-                                e.dataTransfer.setData("text/plain", st.id);
-                                e.dataTransfer.effectAllowed = "move";
-                                setDraggingStory({
-                                  activityId: activity.id,
-                                  storyId: st.id,
-                                });
-                              }}
-                              onDragEnd={() => {
-                                setDraggingStory(null);
-                                setDropHint(null);
-                                justDragged.current = true;
-                                setTimeout(() => (justDragged.current = false), 150);
-                              }}
-                              onDragOver={(e) => {
-                                // 同じ列(場面)内のみ受け付ける
-                                if (
-                                  !draggingStory ||
-                                  draggingStory.storyId === st.id ||
-                                  draggingStory.activityId !== activity.id
-                                )
-                                  return;
-                                e.preventDefault();
-                                e.dataTransfer.dropEffect = "move";
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                const after = e.clientY > rect.top + rect.height / 2;
-                                setDropHint((h) =>
-                                  h?.storyId === st.id && h.after === after
-                                    ? h
-                                    : { storyId: st.id, after },
-                                );
-                              }}
-                              onDragLeave={() =>
-                                setDropHint((h) => (h?.storyId === st.id ? null : h))
-                              }
-                              onDrop={(e) => {
-                                e.preventDefault();
-                                if (
-                                  !draggingStory ||
-                                  draggingStory.storyId === st.id ||
-                                  draggingStory.activityId !== activity.id
-                                )
-                                  return;
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                const after = e.clientY > rect.top + rect.height / 2;
-                                onChange(
-                                  domain.reorderStoryInColumn(
-                                    storyMap,
-                                    activity.id,
-                                    draggingStory.storyId,
-                                    displayIndex + (after ? 1 : 0),
-                                  ),
-                                );
-                                setDraggingStory(null);
-                                setDropHint(null);
-                              }}
-                              onClick={() => {
-                                if (justDragged.current) return;
-                                setEditor({
-                                  mode: "story-edit",
-                                  activityId: activity.id,
-                                  actionId: action.id,
-                                  storyId: st.id,
-                                  initial: st.text,
-                                  initialFixed: st.fixed === true,
-                                });
-                              }}
-                            >
-                              <span style={{ fontSize: noteFontSize(st.text) }}>
-                                {st.fixed && <span className="story-lock">🔒</span>}
-                                {st.text}
-                              </span>
-                              {releases.length > 1 && (
-                                <select
-                                  className="story-release"
-                                  value={st.release ?? -1}
-                                  title="このストーリーのリリース"
-                                  onClick={(e) => e.stopPropagation()}
-                                  onChange={(e) => {
-                                    e.stopPropagation();
-                                    const v = Number(e.target.value);
-                                    // -1 = 未分類(release を外す)
-                                    if (v < 0) {
-                                      onChange(domain.setStoryRelease(storyMap, st.id, -1));
-                                    } else {
-                                      changeRelease(st.id, v);
-                                    }
-                                  }}
-                                >
-                                  <option value={-1}>未分類</option>
-                                  {releases.map((r, ri) => (
-                                    <option key={ri} value={ri}>
-                                      {r.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              )}
-                              {onPickTarget && (
-                                <button
-                                  className="pick-story"
-                                  title="このストーリーをチャットの対象にする"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onPickTarget({ kind: "story", id: st.id, text: st.text });
-                                  }}
-                                >
-                                  📌
-                                </button>
-                              )}
-                              {!st.fixed && (
-                                <button
-                                  className="del-story"
-                                  title="このストーリーを削除"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    removeStoryCard(activity.id, action.id, st.id);
-                                  }}
-                                >
-                                  ×
-                                </button>
-                              )}
-                            </div>
-                        );
-                      })}
-
-                      {/* 追加中の新カード(その場入力) */}
+                    <div className="step-cell story-col" style={{ width: COL_W }}>
                       {editor?.mode === "story-add" && editor.activityId === activity.id && (
                         <InlineInput
                           multiline
@@ -750,11 +776,8 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                           onCancel={() => setEditor(null)}
                         />
                       )}
-
-                      {/* 下: アクター選択チップ(複数アクション時)or「ストーリーを追加」 */}
                       {activity.actions.length > 0 &&
-                        (editor?.mode === "story-pick" &&
-                        editor.activityId === activity.id ? (
+                        (editor?.mode === "story-pick" && editor.activityId === activity.id ? (
                           <div className="story-pick">
                             {activity.actions.map((action) => {
                               const c = colorOf(action.actorId);
@@ -766,42 +789,28 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                                   data-action-id={action.id}
                                   title={`${actor?.name ?? ""}「${action.text}」`}
                                   style={{ background: c.bg, borderColor: c.border }}
-                                  onClick={() =>
-                                    setEditor({
-                                      mode: "story-add",
-                                      activityId: activity.id,
-                                      actionId: action.id,
-                                    })
-                                  }
+                                  onClick={() => setEditor({ mode: "story-add", activityId: activity.id, actionId: action.id })}
                                 >
                                   {actor?.name ?? "?"}
                                 </button>
                               );
                             })}
-                            <button
-                              className="story-chip cancel"
-                              title="やめる"
-                              onClick={() => setEditor(null)}
-                            >
-                              ×
-                            </button>
+                            <button className="story-chip cancel" title="やめる" onClick={() => setEditor(null)}>×</button>
                           </div>
                         ) : (
-                          <button
-                            className="story-slot-add"
-                            title="ストーリーを追加"
-                            onClick={() => startAddStory(activity)}
-                          >
+                          <button className="story-slot-add" title="ストーリーを追加" onClick={() => startAddStory(activity)}>
                             ＋ ストーリーを追加
                           </button>
                         ))}
-                </div>
+                    </div>
                   </Fragment>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* 付箋編集モーダル(body へポータル) */}
       {editor?.mode === "story-edit" && (
