@@ -22,10 +22,20 @@ import {
   type Action,
 } from "./action";
 
+/** リリースの定義(名前だけ。番号は配列の index) */
+export interface ReleaseDef {
+  name: string;
+}
+
 export interface StoryMap {
   actors: Actor[];
   /** ナラティブフロー(並び順が時系列) */
   activities: Activity[];
+  /**
+   * リリースの定義(名前リスト)。index 0 = MVP/リリース1、1 = リリース2 …
+   * 省略時は [{ name: "MVP" }] が既定。
+   */
+  releases?: ReleaseDef[];
 }
 
 // ---- 初期値・正規化 ------------------------------------------------------
@@ -55,6 +65,10 @@ export function normalizeStoryMap(map: StoryMap): StoryMap {
         text: st.text,
         // 確定フラグは true のときだけ保持(JSON を汚さない)
         ...(st.fixed === true ? { fixed: true as const } : {}),
+        // リリース番号: 0(MVP)は省略、正の整数のみ保持
+        ...(typeof st.release === "number" && st.release > 0
+          ? { release: Math.floor(st.release) }
+          : {}),
       })),
     }));
     // ストーリー列の表示順: 実在する story id だけを重複なしで保持
@@ -91,7 +105,11 @@ export function normalizeStoryMap(map: StoryMap): StoryMap {
     buckets.get(key)!.push(a);
   });
   const clustered = order.flatMap((k) => buckets.get(k)!);
-  return { actors, activities: [...clustered, ...standalone] };
+  // リリース定義: 空や未指定は省略(既定 = MVP のみ)
+  const releases = Array.isArray(map.releases) && map.releases.length > 0
+    ? map.releases.map((r) => ({ name: typeof r.name === "string" ? r.name.trim() || "MVP" : "MVP" }))
+    : undefined;
+  return { actors, activities: [...clustered, ...standalone], ...(releases ? { releases } : {}) };
 }
 
 /** 指定の場面たちに「小さな流れ」の名前を付ける(空文字で外す)。正規化で隣接が保証される */
@@ -269,4 +287,32 @@ export function setActionFixed(
   return mapActivity(map, activityId, (act) =>
     mapAction(act, actionId, (a) => withActionFixed(a, fixed)),
   );
+}
+
+/** ストーリーのリリースを変更する */
+export function setStoryRelease(
+  map: StoryMap,
+  storyId: string,
+  release: number,
+): StoryMap {
+  return normalizeStoryMap({
+    ...map,
+    activities: map.activities.map((act) => ({
+      ...act,
+      actions: act.actions.map((a) => ({
+        ...a,
+        stories: a.stories.map((st) =>
+          st.id === storyId ? { ...st, release } : st,
+        ),
+      })),
+    })),
+  });
+}
+
+/** リリース定義を更新する(名前の変更・追加・削除) */
+export function setReleases(
+  map: StoryMap,
+  releases: ReleaseDef[],
+): StoryMap {
+  return normalizeStoryMap({ ...map, releases });
 }

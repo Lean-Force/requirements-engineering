@@ -13,6 +13,18 @@ export const STORY_MAP_JSON_SCHEMA: Record<string, unknown> = {
   additionalProperties: false,
   required: ["actors", "activities"],
   properties: {
+    releases: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["name"],
+        properties: {
+          name: { type: "string", description: "リリースの名前(例: MVP / フェーズ2)" },
+        },
+      },
+      description: "リリースの定義(index 0 = MVP/リリース1 …)。省略は MVP のみ",
+    },
     actors: {
       type: "array",
       items: {
@@ -61,6 +73,11 @@ export const STORY_MAP_JSON_SCHEMA: Record<string, unknown> = {
                       id: { type: "string" },
                       text: { type: "string" },
                       fixed: { type: "boolean" },
+                      release: {
+                        type: "integer",
+                        description:
+                          "リリース番号(0 = MVP/リリース1、1 = リリース2 …)。省略は 0(MVP)。マップを横に切って優先順位を決める。",
+                      },
                     },
                   },
                 },

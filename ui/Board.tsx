@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useRef, useState } from "react";
-import type { StoryMap } from "@/domain";
+import type { ReleaseDef, StoryMap } from "@/domain";
 import * as domain from "@/domain";
 import type { RefineRequest, RefineResponse } from "@/contracts";
 import CardEditModal from "./CardEditModal";
@@ -158,6 +158,16 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
 
   const toggleStandalone = (activityId: string, standalone: boolean) => {
     onChange(domain.setActivityStandalone(storyMap, activityId, standalone));
+  };
+
+  // リリース定義(既定 = MVP のみ)
+  const releases: ReleaseDef[] =
+    storyMap.releases && storyMap.releases.length > 0
+      ? storyMap.releases
+      : [{ name: "MVP" }];
+
+  const changeRelease = (storyId: string, release: number) => {
+    onChange(domain.setStoryRelease(storyMap, storyId, release));
   };
 
   const colorOf = (actorId: string) => {
@@ -550,6 +560,7 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                                   : ""
                               }`}
                               data-action-id={action.id}
+                              data-release={st.release ?? 0}
                               title={st.fixed ? `🔒 確定済み: ${st.text}` : st.text}
                               style={{ background: c.bg, borderColor: c.border }}
                               draggable
@@ -626,6 +637,24 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                                 {st.fixed && <span className="story-lock">🔒</span>}
                                 {st.text}
                               </span>
+                              {releases.length > 1 && (
+                                <select
+                                  className="story-release"
+                                  value={st.release ?? 0}
+                                  title="このストーリーのリリース"
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    changeRelease(st.id, Number(e.target.value));
+                                  }}
+                                >
+                                  {releases.map((r, ri) => (
+                                    <option key={ri} value={ri}>
+                                      {r.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
                               {onPickTarget && (
                                 <button
                                   className="pick-story"

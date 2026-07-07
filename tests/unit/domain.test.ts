@@ -15,6 +15,8 @@ import {
   setStoryFixed,
   setActivityStandalone,
   setFlowName,
+  setReleases,
+  setStoryRelease,
 } from "@/domain";
 import type { StoryMap } from "@/domain";
 
@@ -339,5 +341,49 @@ describe("小さな流れ(flowName)のクラスタ化", () => {
 
     const cleared = setFlowName(renamed, ["一", "二"], "  ");
     expect(cleared.activities[0]).not.toHaveProperty("flowName");
+  });
+});
+
+describe("リリースライン", () => {
+  const base = normalizeStoryMap({
+    actors: [{ id: "a1", name: "A" }],
+    activities: [
+      {
+        id: "act1",
+        actions: [
+          {
+            id: "ac1",
+            actorId: "a1",
+            text: "x",
+            stories: [
+              { id: "s1", text: "MVP", release: 0 },
+              { id: "s2", text: "R2", release: 1 },
+              { id: "s3", text: "未指定" },
+            ],
+          },
+        ],
+      },
+    ],
+    releases: [{ name: "MVP" }, { name: "フェーズ2" }],
+  });
+
+  it("normalize: release 0 は省略され、正の整数だけ残る。releases も保持される", () => {
+    const s1 = base.activities[0].actions[0].stories.find((s) => s.id === "s1")!;
+    const s2 = base.activities[0].actions[0].stories.find((s) => s.id === "s2")!;
+    const s3 = base.activities[0].actions[0].stories.find((s) => s.id === "s3")!;
+    expect(s1).not.toHaveProperty("release"); // 0 は省略
+    expect(s2.release).toBe(1);
+    expect(s3).not.toHaveProperty("release"); // 未指定
+    expect(base.releases).toEqual([{ name: "MVP" }, { name: "フェーズ2" }]);
+  });
+
+  it("setStoryRelease: ストーリーのリリースを変更できる", () => {
+    const moved = setStoryRelease(base, "s1", 1);
+    expect(moved.activities[0].actions[0].stories.find((s) => s.id === "s1")!.release).toBe(1);
+  });
+
+  it("setReleases: リリース定義を更新できる", () => {
+    const updated = setReleases(base, [{ name: "Alpha" }, { name: "Beta" }, { name: "GA" }]);
+    expect(updated.releases).toEqual([{ name: "Alpha" }, { name: "Beta" }, { name: "GA" }]);
   });
 });

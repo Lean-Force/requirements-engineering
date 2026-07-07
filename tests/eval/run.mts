@@ -224,6 +224,34 @@ const CASES: EvalCase[] = [
     mapMustInclude: ["限度額", '"standalone":true'],
   },
   {
+    name: "リリースラインを切る(MVP と後続を分ける)",
+    boardId: "eval-soukin",
+    map: {
+      actors: [{ id: "actor-op", name: "オペレーター" }],
+      activities: [
+        {
+          id: "act-1",
+          actions: [
+            {
+              id: "action-1",
+              actorId: "actor-op",
+              text: "送金を受け付ける",
+              stories: [
+                { id: "s-必須", text: "オペレーターは送金内容を確認したい。なぜなら誤送金を防ぎたいからだ。" },
+                { id: "s-後回し", text: "オペレーターは自動チェック結果を確認したい。なぜなら効率を上げたいからだ。" },
+                { id: "s-後回し2", text: "オペレーターは統計レポートを見たい。なぜなら改善に役立てたいからだ。" },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    message:
+      "リリースを MVP と「フェーズ2」に切って。送金内容の確認は必須(MVP)で、統計レポートとチェック結果は後続。",
+    mapMustInclude: ['"release"', '"releases"', "MVP"],
+    replyMustInclude: ["MVP"],
+  },
+  {
     name: "他業務の合意済みマップを参照して答える",
     boardId: "eval-koza",
     message:

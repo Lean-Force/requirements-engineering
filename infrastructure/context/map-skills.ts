@@ -111,7 +111,10 @@ function actionLines(
 ): string {
   const mark = (fixed?: boolean) => (fixed ? "【確定】" : "");
   const stories = action.stories.filter((s) => (fixedOnly ? s.fixed : true));
-  const storyLines = stories.map((s) => `  - ${mark(s.fixed)}${s.text}`);
+  const storyLines = stories.map(
+    (s) =>
+      `  - ${mark(s.fixed)}${s.text}${typeof s.release === "number" && s.release > 0 ? ` [R${s.release + 1}]` : ""}`,
+  );
   return [
     `- ${mark(action.fixed)}${actorName.get(action.actorId) ?? "?"}「${action.text}」`,
     ...storyLines,

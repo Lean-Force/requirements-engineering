@@ -9,7 +9,7 @@ export type { Actor } from "./actor";
 export type { Story } from "./story";
 export type { Action } from "./action";
 export type { Activity } from "./activity";
-export type { StoryMap } from "./story-map";
+export type { ReleaseDef, StoryMap } from "./story-map";
 
 // ファクトリ
 export { createActor } from "./actor";
@@ -19,7 +19,7 @@ export { createActivity } from "./activity";
 
 // 問い合わせ
 export { actionOf, orderedStories } from "./activity";
-export { findActivity, findAction, setActivityStandalone, setFlowName } from "./story-map";
+export { findActivity, findAction, setActivityStandalone, setFlowName, setReleases, setStoryRelease } from "./story-map";
 
 // 集約への操作(UI からの唯一の変更入口)
 export {

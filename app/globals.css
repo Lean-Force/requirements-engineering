@@ -345,3 +345,8 @@ body,html{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
 .flow-band.unnamed:hover .flow-band-name{color:var(--muted)}
 .flow-band-name.muted{color:var(--muted);cursor:default}
 .flow-band-input{width:90%;border:1px solid var(--accent);border-radius:6px;font-size:11px;padding:1px 6px}
+.story-release{width:100%;border:1px dashed var(--border);border-radius:4px;font-size:9px;padding:1px 2px;background:transparent;color:var(--muted);cursor:pointer;margin-top:4px}
+.story-release:hover{border-color:var(--accent);color:var(--text)}
+.story-card[data-release="1"]{border-left:3px solid #3b82f6}
+.story-card[data-release="2"]{border-left:3px solid #8b5cf6}
+.story-card[data-release="3"]{border-left:3px solid #ec4899}

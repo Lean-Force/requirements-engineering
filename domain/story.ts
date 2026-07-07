@@ -6,6 +6,11 @@ export interface Story {
   text: string;
   /** 確定(チーム合意済み)。true のストーリーは AI が変更・削除できない */
   fixed?: boolean;
+  /**
+   * リリース番号(0 = MVP/リリース1、1 = リリース2 …)。
+   * 未指定は 0(MVP)扱い。マップを横に切って「まず何を作るか」を決める。
+   */
+  release?: number;
 }
 
 export function createStory(text: string): Story {

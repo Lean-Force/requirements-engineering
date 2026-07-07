@@ -10,13 +10,15 @@ import { normalizeStoryMap } from "@/domain";
 import type { StoryMap } from "@/domain";
 
 // 全フィールドを埋めたサンプル(ドメイン型が広がったらここも広げる = 型エラーで気付ける)
-const FULL_SAMPLE: Required<Pick<StoryMap, "actors" | "activities">> = {
+const FULL_SAMPLE: Required<Pick<StoryMap, "actors" | "activities" | "releases">> = {
+  releases: [{ name: "MVP" }, { name: "フェーズ2" }],
   actors: [{ id: "a1", name: "店員" }],
   activities: [
     {
       id: "act1",
       standalone: true, // 随時(時系列外)の場面
       flowName: "受付", // 小さな流れの名前
+      // ストーリーに release を足す場合は actions 内の stories に追加
       storyOrder: ["s1"], // ← AI スキーマからは意図的に除外(サーバー管理)
       actions: [
         {
@@ -24,7 +26,7 @@ const FULL_SAMPLE: Required<Pick<StoryMap, "actors" | "activities">> = {
           actorId: "a1",
           text: "会計する",
           fixed: true,
-          stories: [{ id: "s1", text: "…したい", fixed: true }],
+          stories: [{ id: "s1", text: "…したい", fixed: true, release: 1 }],
         },
       ],
     },
