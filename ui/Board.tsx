@@ -170,6 +170,28 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
     onChange(domain.setStoryRelease(storyMap, storyId, release));
   };
 
+  const addRelease = () => {
+    const next = [...releases, { name: `リリース${releases.length + 1}` }];
+    onChange(domain.setReleases(storyMap, next));
+  };
+
+  const removeRelease = (index: number) => {
+    if (releases.length <= 1) return;
+    // 削除されたリリースのストーリーは未分類に戻す
+    let map = storyMap;
+    for (const act of map.activities)
+      for (const a of act.actions)
+        for (const st of a.stories)
+          if (st.release === index) map = domain.setStoryRelease(map, st.id, -1);
+          else if (typeof st.release === "number" && st.release > index)
+            map = domain.setStoryRelease(map, st.id, st.release - 1);
+    onChange(domain.setReleases(map, releases.filter((_, i) => i !== index)));
+  };
+
+  const renameRelease = (index: number, name: string) => {
+    onChange(domain.setReleases(storyMap, releases.map((r, i) => i === index ? { name } : r)));
+  };
+
   const colorOf = (actorId: string) => {
     const i = actors.findIndex((a) => a.id === actorId);
     return ACTOR_COLORS[(i < 0 ? 0 : i) % ACTOR_COLORS.length];
@@ -533,7 +555,33 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
       {activities.length > 0 && (
         <div className="story-line">
           <div className="lane">
-            <div className="lane-label story-label">ストーリー</div>
+            <div className="lane-label story-label">
+              ストーリー
+              <div className="release-controls">
+                {releases.map((r, i) => (
+                  <div key={i} className="release-tag" data-release={i}>
+                    <input
+                      className="release-name-input"
+                      value={r.name}
+                      onChange={(e) => renameRelease(i, e.target.value)}
+                      title={`リリース ${i + 1} の名前を変更`}
+                    />
+                    {releases.length > 1 && (
+                      <button
+                        className="release-remove"
+                        title="このリリースを削除"
+                        onClick={() => removeRelease(i)}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button className="release-add" onClick={addRelease} title="リリースを追加">
+                  ＋ リリース
+                </button>
+              </div>
+            </div>
             <div className="lane-flow">
               {activities.map((activity) => (
                   <Fragment key={activity.id}>
