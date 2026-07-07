@@ -168,17 +168,16 @@ export default function ContextPanel({
           onChange={(e) => handleFiles(e.target.files)}
         />
         <div className="context-hint">
-          「{boardName}」の資料として登録します。AI がドメイン知識を抽出し、
-          業務横断の知識は自動で共通知識になります。同名ファイルを追加すると
-          資料の更新として扱われ(✍️ 修正済みの知識は保持)、既存の知識との
-          矛盾があれば検出して表示します。
+          全ボード共有の資料として登録します。AI がドメイン知識を抽出します。
+          同名ファイルを追加すると資料の更新として扱われ(✍️ 修正済みの知識は保持)、
+          既存の知識との矛盾があれば検出して表示します。
         </div>
         {error && <div className="context-error">⚠️ {error}</div>}
         <ContextSizeMeter size={knowledge.contextSize} />
       </div>
 
       <div className="context-list">
-        <div className="context-section-title">知識カテゴリ(ボード + 共通)</div>
+        <div className="context-section-title">知識カテゴリ</div>
         {categories.map((c) => (
           <button
             key={c.category}
@@ -198,7 +197,7 @@ export default function ContextPanel({
         />
         <ConflictList conflicts={conflicts} onDismiss={onDismissConflict} />
 
-        <div className="context-section-title">この業務の資料</div>
+        <div className="context-section-title">共有資料</div>
         {sources.length === 0 && (
           <div className="context-empty">
             まだ資料がありません。要件一覧・業務フロー・議事録などを追加すると、

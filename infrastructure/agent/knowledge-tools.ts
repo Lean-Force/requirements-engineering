@@ -10,7 +10,7 @@ import type { KnowledgeCategory } from "@/contracts";
 
 /** チャットルートが実装して渡す、知識操作の実体 */
 export interface KnowledgeToolHandlers {
-  /** この業務で編集できるエントリの一覧(id・カテゴリ・タイトル・スコープ・出典) */
+  /** 全ボード共有のエントリの一覧(id・カテゴリ・タイトル・出典) */
   list(): Promise<
     {
       id: string;
@@ -56,7 +56,7 @@ export function knowledgeToolsServer(handlers: KnowledgeToolHandlers) {
     tools: [
       tool(
         "list_knowledge_entries",
-        "この業務で編集できるドメイン知識エントリの一覧(id つき)。修正・削除の前に対象の id を特定するために使う。",
+        "全ボード共有のドメイン知識エントリの一覧(id つき)。修正・削除の前に対象の id を特定するために使う。",
         {},
         async () => {
           const entries = await handlers.list();
@@ -81,7 +81,7 @@ export function knowledgeToolsServer(handlers: KnowledgeToolHandlers) {
           common: z
             .boolean()
             .optional()
-            .describe("業務横断の共通知識にするか(変更する場合。用語・アクターは常に共通)"),
+            .describe("(現在は全知識が共有のため無視される)"),
         },
         async ({ entryId, title, content, common }) =>
           text(await handlers.update(entryId, { title, content, common })),
@@ -94,7 +94,7 @@ export function knowledgeToolsServer(handlers: KnowledgeToolHandlers) {
       ),
       tool(
         "list_sources",
-        "この業務の資料(ソース)の一覧(id・有効/無効・抽出件数)。資料単位の操作の前に id を特定するために使う。",
+        "全ボード共有の資料(ソース)の一覧(id・有効/無効・抽出件数)。資料単位の操作の前に id を特定するために使う。",
         {},
         async () => {
           const sources = await handlers.listSources();
@@ -140,7 +140,7 @@ export function knowledgeToolsServer(handlers: KnowledgeToolHandlers) {
           common: z
             .boolean()
             .optional()
-            .describe("業務横断の共通知識か(既定 false。用語・アクターは常に共通になる)"),
+            .describe("(現在は全知識が共有のため無視される)"),
         },
         async (entry) => text(await handlers.add(entry)),
       ),

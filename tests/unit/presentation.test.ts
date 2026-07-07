@@ -1,8 +1,9 @@
 // レベル2テスト: 「チャットの system prompt に何が注入されるか」の検証(L1)。
 //
 // 知識は buildKnowledgeContext が全文テキストとして組み立て、常に AI へ提示される。
-// ここでは注入内容 — 業務の分離、on/off の反映、事実の原文どおりの保持、
-// 共通知識の合成、更新の反映 — を決定的に保証する。モックもフェイクも使わず、
+// 全資料・知識は COMMON_SCOPE に集約され、全ボードから参照される。
+// ここでは注入内容 — on/off の反映、事実の原文どおりの保持、
+// 共有知識の合成、更新の反映 — を決定的に保証する。モックもフェイクも使わず、
 // LLM 後段の本物の適用関数(applySource / applyReextraction)へ直接入力を渡す。
 import { promises as fs } from "fs";
 import os from "os";
@@ -38,7 +39,7 @@ afterEach(async () => {
 });
 
 describe("AI への提示内容(レベル2: system prompt 注入)", () => {
-  it("業務Aの業務固有知識は業務Bの注入内容に一切現れない(分離)", async () => {
+  it("全知識は全ボード共有: 業務Aで追加した知識は業務Bからも参照できる", async () => {
     await applySource(A, "送金.txt", Buffer.from("x"), [
       { category: "flows", title: "送金の承認ルール", content: "1,000万円超は部長承認", common: false },
     ]);
@@ -48,10 +49,11 @@ describe("AI への提示内容(レベル2: system prompt 注入)", () => {
 
     const a = await buildKnowledgeContext(A);
     const b = await buildKnowledgeContext(B);
+    // 両方のボードから両方の知識が見える
     expect(a).toContain("送金の承認ルール");
-    expect(a).not.toContain("口座開設");
+    expect(a).toContain("口座開設の審査");
+    expect(b).toContain("送金の承認ルール");
     expect(b).toContain("口座開設の審査");
-    expect(b).not.toContain("送金");
   });
 
   it("資料を off にすると注入内容から消え、戻すと再び現れる", async () => {
@@ -82,7 +84,7 @@ describe("AI への提示内容(レベル2: system prompt 注入)", () => {
     expect(context).toContain("_出典: IF.txt_");
   });
 
-  it("共通知識は全ボードの注入内容に現れ、再抽出(適用)で更新される", async () => {
+  it("共有知識は全ボードに現れ、再抽出(適用)で更新される", async () => {
     const state = await applySource(A, "用語集.txt", Buffer.from("旧原文"), [
       { category: "terms", title: "BSAD", content: "旧定義", common: true },
     ]);
@@ -96,18 +98,18 @@ describe("AI への提示内容(レベル2: system prompt 注入)", () => {
     expect(context).not.toContain("旧定義");
   });
 
-  it("業務と共通はセクションで区別され、用語は常に共通側に入る", async () => {
-    // 用語は common=false と渡されても方針で共通に強制される
+  it("知識は単一のドメイン知識セクションに統合される", async () => {
     await applySource(A, "設計書.txt", Buffer.from("x"), [
       { category: "flows", title: "業務ルール", content: "x", common: false },
       { category: "terms", title: "用語X", content: "x", common: false },
     ]);
     const context = await buildKnowledgeContext(A);
-    const ownSection = context.split("# 業務横断の共通知識")[0];
-    const commonSection = context.split("# 業務横断の共通知識")[1] ?? "";
-    expect(ownSection).toContain("業務ルール");
-    expect(ownSection).not.toContain("用語X");
-    expect(commonSection).toContain("用語X");
+    expect(context).toContain("# ドメイン知識");
+    expect(context).toContain("業務ルール");
+    expect(context).toContain("用語X");
+    // 業務固有/共通の分割はもうない
+    expect(context).not.toContain("業務横断");
+    expect(context).not.toContain("この業務の");
   });
 
   it("確定済みマップが業務名つきで全ボードへ注入される(未確定は載らない)", async () => {
@@ -248,8 +250,7 @@ describe("更新が注入内容へ反映される(鮮度)", () => {
     expect(block).not.toContain("業務A");
   });
 
-  it("ボードを削除すると、業務一覧・共通知識・確定マップが注入から消える", async () => {
-    // 業務A: 共通知識 + 確定マップを持つ
+  it("ボードを削除しても共有知識は消えない(確定マップ断片は掃除される)", async () => {
     await applySource(A, "用語.txt", Buffer.from("x"), [
       { category: "terms", title: "Aの用語", content: "定義", common: true },
     ]);
@@ -271,8 +272,10 @@ describe("更新が注入内容へ反映される(鮮度)", () => {
     await deleteBoard(A);
     block = await buildBoardContext(B);
     expect(block).not.toContain("- 業務A");
-    expect(block).not.toContain("Aの用語"); // ボード由来の共通知識も消える
-    expect(block).not.toContain("## 業務: 業務A"); // 確定マップ断片も掃除される
+    // 共有知識は残る(資料は _common にあるためボード削除で消えない)
+    expect(block).toContain("Aの用語");
+    // 確定マップ断片は掃除される(孤立ボードの断片は confirmedMapSections で除外)
+    expect(block).not.toContain("## 業務: 業務A");
   });
 
   it("contextSize が注入サイズを追従する(追加で増え、削除で減る)", async () => {

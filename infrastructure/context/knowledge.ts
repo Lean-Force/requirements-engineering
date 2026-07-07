@@ -1,17 +1,13 @@
 // ドメイン知識ベースのユースケース。
 //
-// アップロードされたファイルは「ソース(原資料)」として取り込んだボードに保存され、
-// LLM が固定カテゴリの
-// ドメイン知識エントリへ抽出・分解する(agent.extractKnowledge)。
-// その際、各エントリが業務固有か業務横断(common)かを AI が自動判定する。
-// ユーザーはアップロード時にスコープを意識しない。
+// すべての資料・知識は全ボード共有(COMMON_SCOPE に集約)。
+// どのボードからアップロードしても同じ場所に保存され、全ボードから参照できる。
 //
-//   workspaces/<boardId>/
+//   workspaces/_common/
 //     sources.json / knowledge.json / sources/<id>/<原ファイル>
-//   workspaces/_common/  … 旧共通アップロード互換 + map-snippets(確定マップ断片)
+//     map-snippets/<boardId>.md  … 確定マップ断片のキャッシュ
 //
-// AI へは buildKnowledgeContext が system prompt 用の全文テキストを組み立てて渡す
-// (Agent Skill 機構は撤去済み。知識は常に全文提示され、選択的読込はない)。
+// AI へは buildKnowledgeContext が system prompt 用の全文テキストを組み立てて渡す。
 // 永続化は repository.ts。
 // エントリは出典(sourceId)を保持する。同じタイトルが複数ソースから来た場合は
 // 両論併記で出典を明示する(勝手に統合して情報を落とさない)。
@@ -20,7 +16,6 @@ import { promises as fs } from "fs";
 import path from "path";
 import type {
   BoardMeta,
-  BoardProposal,
   ContextSize,
   EntryPatch,
   EntryRevision,
@@ -43,7 +38,6 @@ import { createBoard, listBoards } from "../boards";
 import { isSupportedFile, parseFile } from "./parse";
 import {
   conflictsFile,
-  moveSourceDir,
   proposalsFile,
   readConflicts,
   readProposals,
@@ -64,54 +58,24 @@ import { COMMON_SCOPE, workspaceDir } from "./workspace";
 
 // ---- 読み取り --------------------------------------------------------------
 //
-// ビューは 2 種類:
-//   boardId = 文字列 … そのボードの資料 + AI から見える知識(業務固有 + 全共通)
-//   boardId = null   … 共通ビュー(/knowledge。全スコープの共通知識 + 過去の共通資料)。
-//                       アップロード口はボードのみで、null での addSource は
-//                       旧データ互換・テスト用(UI/API からは到達しない)
+// すべて COMMON_SCOPE に集約。boardId の違いは buildBoardContext でマップを
+// 添える際のみ使う。知識・資料は常に共有。
 
-/** ビューを所有スコープへ解決する */
-const ownerScope = (boardId: string | null): string => boardId ?? COMMON_SCOPE;
+/** すべての知識・資料は共通スコープに集約する */
+const ownerScope = (_boardId: string | null): string => COMMON_SCOPE;
 
 /**
- * スコープの方針(プロダクト決定): 用語(terms)とアクター(actors)は常に
- * 業務横断(共通)。AI の判定やユーザー編集に関わらず保存時に強制する。
- * 共通ビュー(boardId = null)由来のエントリも常に共通。
+ * ビューから見える知識を集める(単一スコープ)。
  */
-const FORCED_COMMON: readonly KnowledgeCategory[] = ["terms", "actors"];
-function applyScopePolicy(
-  category: KnowledgeCategory,
-  common: boolean,
-  fromCommonView: boolean,
-): boolean {
-  return fromCommonView || FORCED_COMMON.includes(category) || common;
-}
-
-/**
- * ビューから見える知識を集める:
- *   - labelOf: 有効なソース id → 出典表示名(他スコープ由来の共通知識には「(共通)」を付す)
- *   - entries: 自スコープの全エントリ + 他スコープの共通エントリ
- */
-async function view(boardId: string | null): Promise<{
+async function view(_boardId: string | null): Promise<{
   labelOf: Map<string, string>;
   entries: KnowledgeEntry[];
 }> {
-  const own = ownerScope(boardId);
-  const scopes = [COMMON_SCOPE, ...(await listBoards()).map((b) => b.id)];
+  const entries = await readEntries(COMMON_SCOPE);
   const labelOf = new Map<string, string>();
-  const entries: KnowledgeEntry[] = [];
-
-  for (const scope of new Set([own, ...scopes])) {
-    const foreign = scope !== own;
-    const scoped = await readEntries(scope);
-    entries.push(...(foreign ? scoped.filter((e) => e.common) : scoped));
-    for (const s of await readSources(scope)) {
-      if (!s.enabled) continue;
-      labelOf.set(
-        s.id,
-        foreign && boardId !== null ? `${s.fileName}(共通)` : s.fileName,
-      );
-    }
+  for (const s of await readSources(COMMON_SCOPE)) {
+    if (!s.enabled) continue;
+    labelOf.set(s.id, s.fileName);
   }
   return { labelOf, entries };
 }
@@ -239,7 +203,7 @@ export async function applySource(
     id: newId(),
     sourceId: id,
     ...e,
-    common: applyScopePolicy(e.category, e.common, boardId === null),
+    common: true,
   }));
   entries.push(...added);
   await writeJson(sourcesFile(scope), sources);
@@ -299,7 +263,7 @@ export async function applyReextraction(
       id: newId(),
       sourceId,
       ...e,
-      common: applyScopePolicy(e.category, e.common, boardId === null),
+      common: true,
     });
   }
   meta.entryCount = kept.length + extracted.length;
@@ -533,8 +497,8 @@ export async function recordBoardProposal(
 }
 
 /**
- * ボード作成提案を受け入れる: ボードを作成し、提案のもとになった資料
- * (メタ・エントリ・原資料)を新しいボードへ移して skill を作り直す。
+ * ボード作成提案を受け入れる: ボードを作成する。
+ * 資料は共通スコープに残り、全ボードから参照できる。
  */
 export async function acceptBoardProposal(
   boardId: string | null,
@@ -546,31 +510,6 @@ export async function acceptBoardProposal(
   if (!proposal) throw new Error("指定の提案が見つかりません");
 
   const board = await createBoard(proposal.name);
-
-  // 資料一式を新ボードへ移す(資料が既に消えていれば作成だけ行う)
-  const fromSources = await readSources(scope);
-  const meta = fromSources.find((s) => s.id === proposal.sourceId);
-  if (meta) {
-    const fromEntries = await readEntries(scope);
-    const own = fromEntries.filter((e) => e.sourceId === proposal.sourceId);
-    await moveSourceDir(scope, board.id, proposal.sourceId);
-    await writeJson(sourcesFile(board.id), [
-      ...(await readSources(board.id)),
-      meta,
-    ]);
-    await writeJson(knowledgeFile(board.id), [
-      ...(await readEntries(board.id)),
-      ...own,
-    ]);
-    await writeJson(
-      sourcesFile(scope),
-      fromSources.filter((s) => s.id !== proposal.sourceId),
-    );
-    await writeJson(
-      knowledgeFile(scope),
-      fromEntries.filter((e) => e.sourceId !== proposal.sourceId),
-    );
-    }
 
   await writeJson(
     proposalsFile(scope),
@@ -667,7 +606,7 @@ export async function addChatKnowledge(
     category: entry.category,
     title: entry.title,
     content: entry.content,
-    common: applyScopePolicy(entry.category, entry.common === true, boardId === null),
+    common: true,
     edited: true,
   };
   entries.push(added);
@@ -734,7 +673,7 @@ export async function updateEntry(
   if (!entry) throw new Error("指定のエントリが見つかりません");
   entry.title = patch.title;
   entry.content = patch.content;
-  entry.common = applyScopePolicy(entry.category, patch.common, boardId === null);
+  entry.common = true;
   entry.edited = true;
   await writeJson(knowledgeFile(scope), entries);
   return getKnowledgeState(boardId);
@@ -796,25 +735,18 @@ export async function buildBoardContext(
 }
 
 /**
- * 知識部分の参照情報: この業務の知識(業務固有)+ 業務横断の共通知識 +
+ * 知識部分の参照情報: 全ボード共有のドメイン知識 +
  * 各業務の確定済みマップ。無ければ空文字。出典(資料名)付き。
  */
 export async function buildKnowledgeContext(boardId: string | null): Promise<string> {
   const { labelOf, entries } = await view(boardId);
-  const own = entries.filter((e) => !e.common);
-  const common = entries.filter((e) => e.common);
 
   const sections: string[] = [];
-  const renderGroup = (title: string, list: KnowledgeEntry[]): void => {
-    const bodies = CATEGORIES.map((c) => {
-      const body = renderCategoryBody(c.category, labelOf, list);
-      // エントリ見出し(##)をカテゴリ見出しの下の階層(###)に落とす
-      return body ? `## ${c.label}\n\n${body.replace(/^## /gm, "### ")}` : null;
-    }).filter((b): b is string => b !== null);
-    if (bodies.length > 0) sections.push(`# ${title}\n\n${bodies.join("\n\n")}`);
-  };
-  renderGroup("この業務のドメイン知識", own);
-  renderGroup("業務横断の共通知識", common);
+  const bodies = CATEGORIES.map((c) => {
+    const body = renderCategoryBody(c.category, labelOf, entries);
+    return body ? `## ${c.label}\n\n${body.replace(/^## /gm, "### ")}` : null;
+  }).filter((b): b is string => b !== null);
+  if (bodies.length > 0) sections.push(`# ドメイン知識\n\n${bodies.join("\n\n")}`);
 
   const maps = await confirmedMapSections();
   if (maps.length > 0) {
