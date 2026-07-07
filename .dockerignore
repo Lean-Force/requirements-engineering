@@ -1,0 +1,10 @@
+node_modules
+.next
+data
+.git
+.env*
+e2e-screenshots
+*.md
+.claude
+tests
+features
