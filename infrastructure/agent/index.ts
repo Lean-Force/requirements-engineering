@@ -32,6 +32,8 @@ import type {
 import type { StoryMap } from "@/domain";
 import { dataRoot, workspaceDir } from "../context/workspace";
 import { boardToolsServer } from "./board-tools";
+import { knowledgeToolsServer } from "./knowledge-tools";
+import type { KnowledgeToolHandlers } from "./knowledge-tools";
 import {
   BUSINESS_DETECT_SYSTEM_PROMPT,
   CONFLICT_DETECT_SYSTEM_PROMPT,
@@ -77,6 +79,7 @@ export async function generate(
   boardId: string,
   conversation: ChatMessage[],
   boardContext: string,
+  knowledgeHandlers?: KnowledgeToolHandlers,
 ): Promise<Pick<ChatResponse, "reply" | "storyMap">> {
   const workspace = workspaceDir(boardId);
   // cwd に指定するため、初回チャット時などまだ無ければ作る(無いと spawn に失敗する)
@@ -91,9 +94,27 @@ export async function generate(
       // ルール + 標準コンテキストブロックの 1 本の system prompt
       systemPrompt: withKnowledgeContext(SYSTEM_PROMPT, boardContext),
       settingSources: [],
-      // ボード操作のカスタムツール(チャットからのボード作成)のみ許可
-      mcpServers: { usm: boardToolsServer() },
-      allowedTools: ["mcp__usm__list_boards", "mcp__usm__create_board"],
+      // カスタムツール: ボード操作 + (結線されていれば)知識の修正・蓄積
+      mcpServers: {
+        usm: boardToolsServer(),
+        ...(knowledgeHandlers ? { kb: knowledgeToolsServer(knowledgeHandlers) } : {}),
+      },
+      allowedTools: [
+        "mcp__usm__list_boards",
+        "mcp__usm__create_board",
+        ...(knowledgeHandlers
+          ? [
+              "mcp__kb__list_knowledge_entries",
+              "mcp__kb__update_knowledge_entry",
+              "mcp__kb__delete_knowledge_entry",
+              "mcp__kb__add_knowledge_entry",
+              "mcp__kb__list_sources",
+              "mcp__kb__set_source_enabled",
+              "mcp__kb__delete_source",
+              "mcp__kb__reextract_source",
+            ]
+          : []),
+      ],
       maxTurns,
       outputFormat: { type: "json_schema", schema: CHAT_OUTPUT_SCHEMA },
     },

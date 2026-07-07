@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createBoard } from "@/infrastructure/boards";
 import {
   acceptBoardProposal,
+  addChatKnowledge,
   addSource,
   applyReextraction,
   applySource,
@@ -24,6 +25,7 @@ import {
   getKnowledgeState,
   getSourceEntries,
   getSourceMarkdown,
+  listOwnEntries,
   recordBoardProposal,
   recordConflicts,
   setSourceEnabled,
@@ -384,5 +386,61 @@ describe("新業務のボード作成提案(記録 → 承認/却下)", () => {
     const proposal = await seedProposal();
     const after = await deleteSource(BOARD, proposal.sourceId);
     expect(after.proposals).toHaveLength(0);
+  });
+});
+
+describe("チャットからの知識操作", () => {
+  it("listOwnEntries: 自スコープのエントリを出典名つきで返す", async () => {
+    await applySource(BOARD, "設計.txt", Buffer.from("x"), [...ENTRIES_A]);
+    const list = await listOwnEntries(BOARD);
+    expect(list).toHaveLength(2);
+    expect(list[0].source).toBe("設計.txt");
+    expect(list[0].content).toBeTruthy();
+    // 他業務由来の共通知識は含まれない(編集できないため)
+    const other = (await import("@/infrastructure/boards")).createBoard;
+    const b2 = (await other("別業務")).id;
+    await applySource(b2, "用語.txt", Buffer.from("x"), [
+      { category: "terms", title: "他業務の用語", content: "y", common: true },
+    ]);
+    const listAfter = await listOwnEntries(BOARD);
+    expect(listAfter.some((e) => e.title === "他業務の用語")).toBe(false);
+  });
+
+  it("addChatKnowledge: 「チャットでの決定」ソースに edited 付きで追加され、注入に反映される", async () => {
+    const added = await addChatKnowledge(BOARD, {
+      category: "flows",
+      title: "承認の合意",
+      content: "1,000万円超は部長承認とする(2026-07-07 チームで合意)",
+    });
+    expect(added.edited).toBe(true);
+
+    const state = await getKnowledgeState(BOARD);
+    const chatSource = state.sources.find((s) => s.fileName === "チャットでの決定")!;
+    expect(chatSource.entryCount).toBe(1);
+
+    const context = await buildKnowledgeContext(BOARD);
+    expect(context).toContain("承認の合意");
+    expect(context).toContain("_出典: チャットでの決定_");
+
+    // 2 件目は同じソースにまとまる
+    await addChatKnowledge(BOARD, {
+      category: "terms",
+      title: "合意用語",
+      content: "定義",
+    });
+    const after = await getKnowledgeState(BOARD);
+    expect(after.sources.filter((s) => s.fileName === "チャットでの決定")).toHaveLength(1);
+    expect(after.sources.find((s) => s.fileName === "チャットでの決定")!.entryCount).toBe(2);
+  });
+
+  it("チャット由来の知識にもスコープ方針が効く(用語は常に共通)", async () => {
+    await addChatKnowledge(BOARD, {
+      category: "terms",
+      title: "チャット用語",
+      content: "定義",
+      common: false,
+    });
+    const common = (await buildKnowledgeContext(BOARD)).split("# 業務横断の共通知識")[1] ?? "";
+    expect(common).toContain("チャット用語");
   });
 });

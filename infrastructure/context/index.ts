@@ -6,6 +6,7 @@
 //   workspace.ts  … データ置き場の解決
 export {
   acceptBoardProposal,
+  addChatKnowledge,
   addSource,
   applyReextraction,
   applySource,
@@ -19,6 +20,7 @@ export {
   getKnowledgeState,
   getSourceEntries,
   getSourceMarkdown,
+  listOwnEntries,
   proposeEntryRevision,
   recordBoardProposal,
   recordConflicts,

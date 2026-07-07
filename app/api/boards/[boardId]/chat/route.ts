@@ -1,7 +1,18 @@
 import { NextResponse } from "next/server";
 import { isConfigured, generate } from "@/infrastructure/agent";
 import { loadStoryMap, applyChatTurn } from "@/infrastructure/storage";
-import { buildBoardContext } from "@/infrastructure/context";
+import {
+  addChatKnowledge,
+  buildBoardContext,
+  deleteEntry,
+  deleteSource,
+  getKnowledgeState,
+  listOwnEntries,
+  reextractSource,
+  setSourceEnabled,
+  updateEntry,
+} from "@/infrastructure/context";
+import type { KnowledgeToolHandlers } from "@/infrastructure/agent/knowledge-tools";
 import { withChatLock } from "@/infrastructure/chat-lock";
 import { emit } from "@/infrastructure/events";
 import { getBoard } from "@/infrastructure/boards";
@@ -69,7 +80,68 @@ export async function POST(request: Request, { params }: Params) {
       // 標準コンテキストブロック(業務一覧 + 知識 + 共通 + 確定マップ + 現在のマップ)を
       // system prompt へ注入する(会話メッセージはユーザーの発話のまま手を加えない)
       const boardContext = await buildBoardContext(boardId, currentMap);
-      const parsed = await generate(boardId, messages, boardContext);
+
+      // 知識ツールのハンドラ(context のユースケースを結線)。
+      // 知識が変更されたら、ターン終了後に全ボードへ contexts を通知する
+      let knowledgeMutated = false;
+      const knowledgeHandlers: KnowledgeToolHandlers = {
+        list: async () =>
+          (await listOwnEntries(boardId)).map(
+            ({ sourceId: _s, content: _c, ...e }) => e,
+          ),
+        update: async (entryId, patch) => {
+          const entry = (await listOwnEntries(boardId)).find((e) => e.id === entryId);
+          if (!entry) return `id ${entryId} のエントリは見つかりません(list で確認してください)`;
+          await updateEntry(boardId, entry.sourceId, entryId, {
+            title: patch.title ?? entry.title,
+            content: patch.content ?? entry.content,
+            common: patch.common ?? entry.common,
+          });
+          knowledgeMutated = true;
+          return `エントリ「${patch.title ?? entry.title}」を修正しました(修正済み扱い)`;
+        },
+        remove: async (entryId) => {
+          const entry = (await listOwnEntries(boardId)).find((e) => e.id === entryId);
+          if (!entry) return `id ${entryId} のエントリは見つかりません`;
+          await deleteEntry(boardId, entry.sourceId, entryId);
+          knowledgeMutated = true;
+          return `エントリ「${entry.title}」を削除しました`;
+        },
+        add: async (entry) => {
+          const added = await addChatKnowledge(boardId, entry);
+          knowledgeMutated = true;
+          return `知識「${added.title}」を追加しました(出典: チャットでの決定${added.common ? "・共通" : ""})`;
+        },
+        listSources: async () =>
+          (await getKnowledgeState(boardId)).sources.map((s) => ({
+            id: s.id,
+            fileName: s.fileName,
+            enabled: s.enabled,
+            entryCount: s.entryCount,
+          })),
+        setSourceEnabled: async (sourceId, enabled) => {
+          const state = await setSourceEnabled(boardId, sourceId, enabled);
+          knowledgeMutated = true;
+          const name = state.sources.find((s) => s.id === sourceId)?.fileName ?? sourceId;
+          return `資料「${name}」を${enabled ? "有効" : "無効"}にしました(AI への提示が変わります)`;
+        },
+        removeSource: async (sourceId) => {
+          const name =
+            (await getKnowledgeState(boardId)).sources.find((s) => s.id === sourceId)
+              ?.fileName ?? sourceId;
+          await deleteSource(boardId, sourceId);
+          knowledgeMutated = true;
+          return `資料「${name}」を削除しました(抽出済みの知識も消えました)`;
+        },
+        reextractSource: async (sourceId) => {
+          const state = await reextractSource(boardId, sourceId);
+          knowledgeMutated = true;
+          const source = state.sources.find((s) => s.id === sourceId);
+          return `資料「${source?.fileName ?? sourceId}」を再抽出しました(${source?.entryCount ?? "?"} 件)`;
+        },
+      };
+
+      const parsed = await generate(boardId, messages, boardContext, knowledgeHandlers);
 
       // AI 出力を保存してよい形へ整える(正規化・確定要素の保護・表示順の引き継ぎ)。
       // 手順の順序は domain.applyAiUpdate に閉じている。
@@ -86,6 +158,8 @@ export async function POST(request: Request, { params }: Params) {
         parsed.reply,
         fullConversation,
       );
+
+      if (knowledgeMutated) emit("*", "contexts");
 
       const result: ChatResponse = {
         reply: parsed.reply,

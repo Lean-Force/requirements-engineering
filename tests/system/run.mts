@@ -11,6 +11,15 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 
+// .env.local から LLM 接続設定を読む(Next.js の自動読み込みは CLI では効かない)
+const envLocal = path.join(process.cwd(), ".env.local");
+try {
+  for (const line of (await fs.readFile(envLocal, "utf-8")).split("\n")) {
+    const m = line.match(/^([A-Z_]+)=(.*)$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
+  }
+} catch { /* .env.local が無ければ既存の env で動く */ }
+
 process.env.DATA_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "usm-system-"));
 
 const { POST: boardsPost } = await import("../../app/api/boards/route");
@@ -199,7 +208,7 @@ let mapAfterChat: Json = { actors: [], activities: [] };
   const listed: Json = await (
     await entriesGet(json("GET"), { params: { boardId: board.id, id: mainSourceId } })
   ).json();
-  const rule = listed.entries?.find((e: Json) => `${e.title}${e.content}`.includes("1,000万"));
+  const rule = listed.entries?.find((e: Json) => e.category === "flows" && `${e.title}${e.content}`.includes("1,000万"));
   const problems: string[] = [];
   if (!rule) problems.push("承認ルールのエントリが見つからない");
   else {
@@ -217,6 +226,7 @@ let mapAfterChat: Json = { actors: [], activities: [] };
   }
   check("エントリの AI 修正案: 指示どおりの修正 + 理由", problems);
 }
+
 
 // 6. 矛盾検出(実 LLM): 改定規程を取り込むと食い違いが検出される
 {
@@ -240,6 +250,89 @@ let mapAfterChat: Json = { actors: [], activities: [] };
     }
   }
   check("矛盾検出: 改定規程との食い違いを検出 → 解決", problems);
+}
+
+// 6.5 チャットからのコンテキスト管理(kb ツール): 修正・会話からの注入・資料 off
+{
+  const problems: string[] = [];
+  const { listOwnEntries } = await import("../../infrastructure/context");
+
+  // (a) 資料から読み取った知識が違う → チャットで修正
+  let res = await chatPost(
+    json("POST", {
+      messages: [
+        {
+          role: "user",
+          content:
+            "知識にある BSAD の定義を「Basic System Architecture Document(基本システム設計書)の社内略称」に修正して。マップは変えないで。",
+        },
+      ],
+      storyMap: mapAfterChat,
+    }),
+    P,
+  );
+  let body: Json = await res.json();
+  if (res.status !== 200) problems.push(`修正チャットが ${res.status}(${body.error ?? ""})`);
+  else {
+    const bsad = (await listOwnEntries(board.id)).find((e: Json) => e.title.includes("BSAD"));
+    if (!bsad) problems.push("BSAD エントリが見つからない");
+    else {
+      if (!bsad.content.includes("基本システム設計書")) problems.push(`修正が反映されていない: ${bsad.content}`);
+      if (!bsad.edited) problems.push("修正済み(edited)になっていない");
+    }
+  }
+
+  // (b) 会話で決まったことを知識として注入
+  res = await chatPost(
+    json("POST", {
+      messages: [
+        {
+          role: "user",
+          content:
+            "いま決めたこと:「休日の送金依頼は翌営業日の 9 時に処理する」。これを知識に残して。マップは変えないで。",
+        },
+      ],
+      storyMap: mapAfterChat,
+    }),
+    P,
+  );
+  body = await res.json();
+  if (res.status !== 200) problems.push(`注入チャットが ${res.status}(${body.error ?? ""})`);
+  else {
+    const saved = (await listOwnEntries(board.id)).find(
+      (e: Json) => e.source === "チャットでの決定",
+    );
+    if (!saved) problems.push("チャットでの決定が知識に残っていない");
+    else if (!`${saved.title}${saved.content}`.includes("翌営業日"))
+      problems.push(`決定内容が正確に残っていない: ${saved.content}`);
+  }
+
+  // (c) 資料が違う → チャットで off にするとコンテキストが変わる
+  res = await chatPost(
+    json("POST", {
+      messages: [
+        {
+          role: "user",
+          content:
+            "資料「新規程.txt」は内容が誤っているので、いったん知識から外して(削除はしないで)。マップは変えないで。",
+        },
+      ],
+      storyMap: mapAfterChat,
+    }),
+    P,
+  );
+  body = await res.json();
+  if (res.status !== 200) problems.push(`off チャットが ${res.status}(${body.error ?? ""})`);
+  else {
+    const state: Json = await (await contextsGet(json("GET"), P)).json();
+    const neu = state.sources.find((s: Json) => s.fileName === "新規程.txt");
+    if (!neu) problems.push("新規程.txt が見つからない(削除されてしまった?)");
+    else if (neu.enabled !== false) problems.push("新規程.txt が off になっていない");
+    const { buildKnowledgeContext } = await import("../../infrastructure/context");
+    const context = await buildKnowledgeContext(board.id);
+    if (context.includes("2億円")) problems.push("off にした資料の知識が注入に残っている");
+  }
+  check("チャットでコンテキスト管理: 修正・会話からの注入・資料 off", problems);
 }
 
 // 7. 新業務の検知(実 LLM)→ 承認でボード作成 + 資料移動
@@ -276,5 +369,5 @@ let mapAfterChat: Json = { actors: [], activities: [] };
 }
 
 await fs.rm(process.env.DATA_DIR!, { recursive: true, force: true });
-console.log(`\n${8 - failed}/8 passed`);
+console.log(`\n${9 - failed}/9 passed`);
 process.exit(failed > 0 ? 1 : 0);

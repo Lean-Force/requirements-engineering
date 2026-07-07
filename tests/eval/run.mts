@@ -16,6 +16,15 @@
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
+
+// .env.local から LLM 接続設定を読む(Next.js の自動読み込みは CLI では効かない)
+const envLocal = path.join(process.cwd(), ".env.local");
+try {
+  for (const line of (await fs.readFile(envLocal, "utf-8")).split("\n")) {
+    const m = line.match(/^([A-Z_]+)=(.*)$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
+  }
+} catch { /* .env.local が無ければ既存の env で動く */ }
 import { detectConflicts, detectNewBusiness, extractKnowledge, extractKnowledgeMulti, generate } from "../../infrastructure/agent";
 import {
   knowledgeFile,

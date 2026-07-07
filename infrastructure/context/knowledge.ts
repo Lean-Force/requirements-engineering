@@ -596,6 +596,88 @@ export async function dismissBoardProposal(
   return getKnowledgeState(boardId);
 }
 
+// ---- チャットからの知識操作 ---------------------------------------------------
+
+/** チャット由来の知識をまとめる組み込みソースの id / 表示名 */
+const CHAT_SOURCE_ID = "src-chat";
+const CHAT_SOURCE_NAME = "チャットでの決定";
+
+/**
+ * この業務で編集できるエントリの一覧(チャットの知識ツール用)。
+ * 自スコープのエントリのみ(他業務由来の共通知識はここからは編集できない)。
+ */
+export async function listOwnEntries(boardId: string | null): Promise<
+  {
+    id: string;
+    sourceId: string;
+    category: KnowledgeCategory;
+    title: string;
+    content: string;
+    common: boolean;
+    edited: boolean;
+    source: string;
+  }[]
+> {
+  const scope = ownerScope(boardId);
+  const sources = new Map((await readSources(scope)).map((s) => [s.id, s.fileName]));
+  return (await readEntries(scope)).map((e) => ({
+    id: e.id,
+    sourceId: e.sourceId,
+    category: e.category,
+    title: e.title,
+    content: e.content,
+    common: e.common,
+    edited: e.edited === true,
+    source: sources.get(e.sourceId) ?? "(不明な資料)",
+  }));
+}
+
+/**
+ * 会話で確定した決定・定義を知識として追加する(出典 =「チャットでの決定」)。
+ * 人の合意によるものなので edited = true(再抽出の概念がなく、上書きされない)。
+ */
+export async function addChatKnowledge(
+  boardId: string | null,
+  entry: { category: KnowledgeCategory; title: string; content: string; common?: boolean },
+): Promise<KnowledgeEntry> {
+  const scope = ownerScope(boardId);
+  const sources = await readSources(scope);
+  let source = sources.find((s) => s.id === CHAT_SOURCE_ID);
+  if (!source) {
+    source = {
+      id: CHAT_SOURCE_ID,
+      fileName: CHAT_SOURCE_NAME,
+      enabled: true,
+      entryCount: 0,
+      uploadedAt: new Date().toISOString(),
+    };
+    sources.push(source);
+    // 出典ビューア用に、実体の説明を原資料として置いておく
+    await saveOriginal(
+      scope,
+      CHAT_SOURCE_ID,
+      CHAT_SOURCE_NAME,
+      Buffer.from("チャットでの合意により追加された知識(原資料はありません)"),
+    );
+  }
+  const entries = await readEntries(scope);
+  const added: KnowledgeEntry = {
+    id: newId(),
+    sourceId: CHAT_SOURCE_ID,
+    category: entry.category,
+    title: entry.title,
+    content: entry.content,
+    common: applyScopePolicy(entry.category, entry.common === true, boardId === null),
+    edited: true,
+  };
+  entries.push(added);
+  source.entryCount = entries.filter((e) => e.sourceId === CHAT_SOURCE_ID).length;
+  source.uploadedAt = new Date().toISOString();
+  await writeJson(sourcesFile(scope), sources);
+  await writeJson(knowledgeFile(scope), entries);
+  return added;
+}
+
 // ---- エントリ単位の操作(AI と協働で直す) -----------------------------------
 
 /** ソース 1 件の抽出エントリ一覧(編集 UI 用) */
