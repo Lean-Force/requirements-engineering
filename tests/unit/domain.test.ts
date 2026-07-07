@@ -371,9 +371,9 @@ describe("リリースライン", () => {
     const s1 = base.activities[0].actions[0].stories.find((s) => s.id === "s1")!;
     const s2 = base.activities[0].actions[0].stories.find((s) => s.id === "s2")!;
     const s3 = base.activities[0].actions[0].stories.find((s) => s.id === "s3")!;
-    expect(s1).not.toHaveProperty("release"); // 0 は省略
+    expect(s1.release).toBe(0); // 0 = MVP(明示的に入れた)
     expect(s2.release).toBe(1);
-    expect(s3).not.toHaveProperty("release"); // 未指定
+    expect(s3).not.toHaveProperty("release"); // 未指定 = 未分類
     expect(base.releases).toEqual([{ name: "MVP" }, { name: "フェーズ2" }]);
   });
 

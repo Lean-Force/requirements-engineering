@@ -65,8 +65,9 @@ export function normalizeStoryMap(map: StoryMap): StoryMap {
         text: st.text,
         // 確定フラグは true のときだけ保持(JSON を汚さない)
         ...(st.fixed === true ? { fixed: true as const } : {}),
-        // リリース番号: 0(MVP)は省略、正の整数のみ保持
-        ...(typeof st.release === "number" && st.release > 0
+        // リリース番号: undefined = 未分類(どのリリースにも入っていない)。
+        // 0 = MVP(明示的に入れた)。省略と 0 は意味が違う
+        ...(typeof st.release === "number"
           ? { release: Math.floor(st.release) }
           : {}),
       })),
@@ -289,7 +290,7 @@ export function setActionFixed(
   );
 }
 
-/** ストーリーのリリースを変更する */
+/** ストーリーのリリースを変更する(負の値で未分類に戻す) */
 export function setStoryRelease(
   map: StoryMap,
   storyId: string,
@@ -302,7 +303,11 @@ export function setStoryRelease(
       actions: act.actions.map((a) => ({
         ...a,
         stories: a.stories.map((st) =>
-          st.id === storyId ? { ...st, release } : st,
+          st.id === storyId
+            ? release < 0
+              ? { ...st, release: undefined }
+              : { ...st, release }
+            : st,
         ),
       })),
     })),

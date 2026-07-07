@@ -640,14 +640,21 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                               {releases.length > 1 && (
                                 <select
                                   className="story-release"
-                                  value={st.release ?? 0}
+                                  value={st.release ?? -1}
                                   title="このストーリーのリリース"
                                   onClick={(e) => e.stopPropagation()}
                                   onChange={(e) => {
                                     e.stopPropagation();
-                                    changeRelease(st.id, Number(e.target.value));
+                                    const v = Number(e.target.value);
+                                    // -1 = 未分類(release を外す)
+                                    if (v < 0) {
+                                      onChange(domain.setStoryRelease(storyMap, st.id, -1));
+                                    } else {
+                                      changeRelease(st.id, v);
+                                    }
                                   }}
                                 >
+                                  <option value={-1}>未分類</option>
                                   {releases.map((r, ri) => (
                                     <option key={ri} value={ri}>
                                       {r.name}
