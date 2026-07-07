@@ -1,102 +1,117 @@
 # USM AI Chat
 
-AI Agent Chatを通じてUser Story Mappingを整理・可視化するプロダクト。
+AI Agent Chat を通じて User Story Mapping を整理・可視化するプロダクト。
 
 ## 概要
 
-チャットベースのインターフェースでAIと対話しながら、User Story Mapを構築・整理できるツール。
-AIがユーザーの入力からアクティビティ、ユーザータスク、ユーザーストーリーを抽出・提案し、カンバン風のボードUIにリアルタイムで反映する。
+チャットベースのインターフェースで AI と対話しながら、User Story Map を構築・整理できるツール。
+AI がユーザーの入力からアクティビティ、ユーザータスク、ユーザーストーリーを抽出・提案し、カンバン風のボード UI にリアルタイムで反映する。
 
 ## 主な機能
 
-- **AIチャットによるストーリー整理**: 自然言語でプロダクトの要件を伝えると、AIがUser Story Mapの要素に分解・構造化
-- **ドメイン知識ベース**: 要件一覧・業務フロー・議事録・用語集などの Excel / CSV / PDF / テキストをアップロードすると、AI が固定5カテゴリ(用語集 / アクター / 業務フロー・ルール / データ・IF定義 / 背景・課題)のドメイン知識に抽出・蓄積する。知識はカテゴリごとの Agent Skill になり、AI が必要と判断したときだけ参照(progressive disclosure)。各知識は出典(元ファイル)を保持し、資料単位で on/off 可能
-- **カンバン風ボードUI**: アクティビティ → ユーザータスク → ユーザーストーリーの階層をビジュアルに表示
-- **ドラッグ&ドロップ編集**: ストーリーの並び替え、優先度の変更、リリース単位のグルーピング
-- **ボード = 業務**: 業務ごとにボードを作り、マップ・会話・ドメイン知識をボード単位で管理。業務横断の知識(全社用語集など)は「共通知識」として全ボードで参照される
-- **チーム共有**: 同じボードを開いたメンバーでマップを共有。他メンバーの変更・AI ターンは SSE でリアルタイムに反映され、AI ターンはボードごとに到着順で直列処理される
+- **AI チャットによるマップ編集**: 自然言語でプロダクトの要件を伝えると、AI が User Story Map の要素（Activity / Action / Story）に分解・構造化。Activity の追加・削除・並び替えもチャットから指示できる
+- **ドメイン知識ベース**: Excel / CSV / PDF / テキストをアップロードすると、AI が固定 5 カテゴリ（用語集 / アクター / 業務フロー・ルール / データ・IF 定義 / 背景・課題）のドメイン知識に抽出・蓄積。全ボード共有で、どのボードからも参照できる
+- **カンバン風ボード UI**: アクティビティ → ユーザータスク → ユーザーストーリーの階層をビジュアルに表示
+- **ドラッグ&ドロップ編集**: ストーリーの並び替え、優先度の変更、リリースライン間の移動
+- **リリースライン**: ストーリーを MVP / フェーズ 2 … にグルーピングする横断線
+- **チーム共有**: 同じボードを開いたメンバーでマップを共有。他メンバーの変更・AI ターンは SSE でリアルタイムに反映
 
-## 技術スタック
-
-- **フロントエンド**: Next.js / React
-- **AI**: Claude Agent SDK 経由で Claude を呼び出し(本番は Amazon Bedrock、AWS 認証は標準チェーン = EKS では IRSA)
-- **UI**: カンバン風ボードコンポーネント
-
-## User Story Mapの構造
-
-```
-アクティビティ(Activity)
-├── ユーザータスク(User Task)
-│   ├── ユーザーストーリー(User Story) ← Release 1
-│   ├── ユーザーストーリー(User Story) ← Release 2
-│   └── ユーザーストーリー(User Story) ← Release 3
-└── ユーザータスク(User Task)
-    ├── ユーザーストーリー(User Story) ← Release 1
-    └── ユーザーストーリー(User Story) ← Release 2
-```
-
-## 開発
+## Docker で起動
 
 ```bash
-# セットアップ
+docker run -p 3000:3000 \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  -v usm-data:/app/data \
+  ghcr.io/lean-force/requirements-engineering:latest
+```
+
+http://localhost:3000 でアクセスできる。
+
+### LLM 接続の設定
+
+3 つの接続方法がある。いずれか 1 つを環境変数で指定する。
+
+| 方法 | 環境変数 | 用途 |
+|---|---|---|
+| Anthropic API 直結 | `ANTHROPIC_API_KEY=sk-ant-...` | 最もシンプル |
+| Amazon Bedrock | `CLAUDE_CODE_USE_BEDROCK=1` + AWS 認証情報 | 本番 / EKS（IRSA） |
+| ローカル Claude Code | `CLAUDE_LOCAL_AUTH=1` | このマシンの `~/.claude` 認証を使う |
+
+**ローカル Claude Code 認証を Docker で使う場合:**
+
+```bash
+docker run -p 3000:3000 \
+  -e CLAUDE_LOCAL_AUTH=1 \
+  -e ANTHROPIC_MODEL=claude-opus-4-8 \
+  -v usm-data:/app/data \
+  -v ~/.claude:/home/nextjs/.claude:ro \
+  ghcr.io/lean-force/requirements-engineering:latest
+```
+
+### その他の環境変数
+
+| 変数 | 既定値 | 説明 |
+|---|---|---|
+| `ANTHROPIC_MODEL` | (SDK 既定) | モデル ID。Bedrock は `us.anthropic.claude-opus-4-8` 形式 |
+| `DATA_DIR` | `/app/data` | 永続データの保存先 |
+| `CHAT_MAX_TURNS` | `24` | エージェントループの上限ターン数 |
+| `CONTEXT_WINDOW_TOKENS` | `200000` | コンテキストウィンドウ上限（トークン数） |
+| `PORT` | `3000` | サーバーポート |
+
+### データの永続化
+
+ボード・マップ・会話履歴・ドメイン知識はすべて `DATA_DIR`（既定: `/app/data`）に保存される。Docker ではボリュームマウントで永続化する:
+
+```bash
+-v usm-data:/app/data        # 名前付きボリューム
+-v ./my-data:/app/data        # ホストディレクトリ
+```
+
+## ローカル開発
+
+```bash
 npm install
 
-# LLM の接続情報を設定
+# .env.local を設定
 cp .env.example .env.local
-# Bedrock 経由: CLAUDE_CODE_USE_BEDROCK=1 + AWS_REGION + ANTHROPIC_MODEL(us.anthropic.… 形式)
-#   AWS 認証は標準クレデンシャルチェーン(ローカルはプロファイル、EKS は IRSA)
-# ローカル開発の代替: ANTHROPIC_API_KEY で Anthropic API 直結
+# ANTHROPIC_API_KEY / CLAUDE_CODE_USE_BEDROCK / CLAUDE_LOCAL_AUTH のいずれかを設定
 
-# 開発サーバー起動
 npm run dev
 # → http://localhost:3000
 ```
 
-LLM の接続情報は **サーバー側の API Route(`/api/chat`)でのみ** 使用し、ブラウザには公開されません。
-未設定でもボード表示・編集は動作します(チャット送信時のみ必要)。
+LLM の接続情報はサーバー側の API Route でのみ使用し、ブラウザには公開されない。
+未設定でもボード表示・編集は動作する（チャット送信時のみ必要）。
 
-## アーキテクチャ(レイヤー分離・詳細は MODEL.md)
+## User Story Map の構造
 
 ```
-domain/          ドメイン層(純粋・依存ゼロ。ユニットテストで保護)
-  story-map.ts     集約ルートと基本操作・normalize
-  ordering.ts      並び・移動のポリシー(表示順 storyOrder)
-  fixed.ts         確定(fixed)要素の保護ポリシー
-  ai-update.ts     AI 出力の取り込みパイプライン(applyAiUpdate)
-  schema.ts        AI 構造化出力用 JSON スキーマ(型との同期をテストで保証)
-infrastructure/  外界
-  agent/           LLM ゲートウェイ(index)+ prompts / schema / board-tools
-  context/         知識ベース: knowledge(ユースケース)/ skills(SKILL.md レンダラ)
-                   / repository(JSON IO)/ parse(ファイル→Markdown)/ workspace
-  storage/         セッション(マップ・会話・版履歴)の永続化
-  boards.ts / events.ts / chat-lock.ts
-contracts.ts     層をまたぐ転送DTO(ChatMessage / KnowledgeState / BoardEvent など)
-ui/              表現層(Board / ChatPanel / ContextPanel / BoardSwitcher /
-                 CardEditModal / hooks = useUndoRedo・useBoardEvents)
-app/             配線(ページ / API ルート)
-tests/unit/      vitest(domain・知識ベース・スキーマ同期・アーキテクチャ。npm run test:unit)
+アクティビティ(Activity)
+├── ユーザータスク(Action)
+│   ├── ユーザーストーリー(Story) ← Release 1
+│   ├── ユーザーストーリー(Story) ← Release 2
+│   └── ユーザーストーリー(Story) ← Release 3
+└── ユーザータスク(Action)
+    ├── ユーザーストーリー(Story) ← Release 1
+    └── ユーザーストーリー(Story) ← Release 2
 ```
 
-層の依存ルール(モジュールの責務定義)は `.dependency-cruiser.cjs` が唯一の正。
-`npm run check:deps`(CLI)と `tests/unit/architecture.test.ts`(ArchUnit スタイルの
-テスト)の両方で強制され、違反はテスト失敗として現れる。
+## アーキテクチャ
 
-## テスト戦略(コンテキスト管理)
+```
+domain/          ドメイン層（純粋・依存ゼロ）
+infrastructure/  外界（LLM ゲートウェイ / 知識ベース / 永続化）
+ui/              表現層（Board / ChatPanel / ContextPanel）
+app/             配線（ページ / API ルート）
+contracts.ts     層をまたぐ転送 DTO
+```
 
-| レベル | 対象 | 実行 | LLM |
-|---|---|---|---|
-| 1. 管理操作 | 取り込み・on/off・削除・再抽出・共通同期が knowledge.json / SKILL.md に正しく反映されるか | `npm run test:unit`(knowledge) | モック |
-| 2. AI への提示 | チャット直前に渡る skill 集合と SKILL.md の中身(分離・description のトリガー情報・事実の原文性・1024字制限) | `npm run test:unit`(presentation) | 不要 |
-| 3. AI の利用 | 読むべき時に読む / 読まない / 正確に反映 / 業務間分離 / 矛盾時は業務優先 | `npm run eval`(リリース前・プロンプト変更時に手動) | 実 LLM(数分・$1〜2) |
+詳細は MODEL.md を参照。層の依存ルールは `.dependency-cruiser.cjs` で強制。
 
-レベル3の判定は `generate()` が記録する **usedSkills(実際に読んだ skill)** と
-構造化出力(マップ JSON)への事実アサートで行い、文言一致に頼らない。
+## テスト
 
-- **チャット → マップ生成**: `/api/boards/<id>/chat` が会話履歴と現在のマップを `infrastructure/agent`(Claude Agent SDK + `json_schema` 構造化出力)に渡し、「返信」+「更新後のマップ全体」を受け取り、`domain.applyAiUpdate`(正規化 → 確定保護 → 表示順引き継ぎ → 正規化)で整えて保存する。AI ターンはボード単位のミューテックスで直列化。
-- **ボード = 業務**: `data/workspaces/<boardId>/` にマップ・会話・版履歴・知識ベースを集約(`data/boards.json` が一覧)。旧シングルボード形式は初回アクセス時に「最初のボード」へ自動移行される。
-- **ドメイン知識ベース**: `/api/boards/<id>/contexts` にアップロードされたファイルは「ソース(原資料)」として保存され、LLM が固定カテゴリの知識エントリへ抽出(`infrastructure/agent.extractKnowledge`)。エントリは出典付きで蓄積され、カテゴリごとに `kb-<category>` skill へレンダリングされる(description にエントリのタイトル一覧が入る)。業務横断の共通知識は `workspaces/_common/` に置かれ、チャット直前に各ボードへ `kb-common-<category>` として同期される。AI は description を常時見て、必要なときだけ本文を Read する。ワークスペース外への Read は PreToolUse フックで遮断。
-- **チーム同期**: 変更は `/api/boards/<id>/events`(SSE)でそのボードのクライアントへ通知(薄い通知 → 再取得)。単一レプリカ前提。
-- **永続化**: マップはボードのワークスペース内 `session.json` にファイル保存(`/api/boards/<id>/storymap` の GET/PUT)。
-- **ボード直接編集**: 行動・ストーリーの追加 / 編集 / 削除。変更は必ず `domain` の集約操作を経由し、即 `data/storymap.json` へ保存。
-
-使用モデルは `ANTHROPIC_MODEL`(Bedrock はインファレンスプロファイル形式 `us.anthropic.…` でピニング)で設定する。
+```bash
+npm run test:unit     # vitest（domain・知識ベース・スキーマ同期・アーキテクチャ）
+npm run check:deps    # 依存関係ルール
+npm run eval          # LLM eval（要 LLM 接続。プロンプト変更時に手動実行）
+```
