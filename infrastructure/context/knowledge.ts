@@ -50,7 +50,7 @@ import {
   sourcesFile,
   writeJson,
 } from "./repository";
-import { CATEGORIES, renderCategoryBody } from "./skills";
+import { CATEGORIES, renderCategoryBody, renderSkill, syncSkillsDir } from "./skills";
 import { confirmedMapSections } from "./map-skills";
 import { loadStoryMap } from "../storage";
 import type { StoryMap } from "@/domain";
@@ -699,13 +699,68 @@ export async function deleteEntry(
   return getKnowledgeState(boardId);
 }
 
-// ---- AI への注入(system prompt 用の全文テキスト) ----------------------------
+// ---- AI への提示(チャット = skills + 常時注入 / 知識管理 = 全文注入) ---------
 
 /**
- * すべての AI 行動が注入する「標準コンテキストブロック」を組み立てる:
- *   業務(ボード)一覧 + この業務の知識 + 業務横断の共通知識
- *   + 各業務の確定済みマップ + 現在の User Story Map(ボードのとき)。
+ * チャット(と付箋の推敲)が常時注入するコンテキストを組み立てる:
+ *   業務(ボード)一覧 + 各業務の合意済みマップ + 現在の User Story Map。
+ * ドメイン知識はここに入れない — kb-* skill(syncKnowledgeSkills)として
+ * ワークスペースへ同期され、AI が必要と判断したときだけ読まれる。
+ * 合意済みマップはボード間の齟齬チェックに常時使うため注入に残す。
  * currentMap を渡すとそれを使う(チャットはミューテックス内のスナップショットを渡す)。
+ */
+export async function buildChatContext(
+  boardId: string,
+  currentMap?: StoryMap,
+): Promise<string> {
+  const sections: string[] = [];
+
+  const boards = await listBoards();
+  if (boards.length > 0) {
+    sections.push(
+      `# 業務(ボード)一覧\n${boards
+        .map((b) => `- ${b.name}${b.id === boardId ? "(現在のボード)" : ""}`)
+        .join("\n")}`,
+    );
+  }
+
+  const maps = await confirmedMapSections();
+  if (maps.length > 0) {
+    sections.push(
+      `# 各業務の合意済みマップ(確定 = チーム合意。「なぜなら」以降は合意された理由)\n\n${maps
+        .map((m) => `## 業務: ${m.name}\n\n${m.body}`)
+        .join("\n\n")}`,
+    );
+  }
+
+  const map = currentMap ?? (await loadStoryMap(boardId));
+  sections.push(
+    `# 現在の User Story Map(この業務の現状)\n\n${JSON.stringify(map)}`,
+  );
+  return sections.join("\n\n");
+}
+
+/**
+ * ドメイン知識をボードのワークスペースへ kb-* skill として同期する。
+ * チャット・推敲の直前に呼ぶ(知識は全ボード共有のため、内容はどのボードでも同じ)。
+ */
+export async function syncKnowledgeSkills(boardId: string): Promise<void> {
+  const { labelOf, entries } = await view(boardId);
+  const skills = CATEGORIES.map((c) =>
+    renderSkill(c.category, labelOf, entries),
+  ).filter((s): s is { name: string; markdown: string } => s !== null);
+  await syncSkillsDir(
+    path.join(workspaceDir(boardId), ".claude", "skills"),
+    skills,
+  );
+}
+
+/**
+ * 知識管理系の AI 行動(抽出・エントリ修正・業務判定)が注入する
+ * 「標準コンテキストブロック」を組み立てる:
+ *   業務(ボード)一覧 + ドメイン知識(全文) + 各業務の確定済みマップ
+ *   + 現在の User Story Map(ボードのとき)。
+ * これらは知識そのものが作業対象のため、skills ではなく全文を渡す。
  */
 export async function buildBoardContext(
   boardId: string | null,

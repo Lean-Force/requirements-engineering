@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isConfigured, refineCard } from "@/infrastructure/agent";
-import { buildBoardContext } from "@/infrastructure/context";
+import { buildChatContext, syncKnowledgeSkills } from "@/infrastructure/context";
 import { getBoard } from "@/infrastructure/boards";
 import type { RefineRequest } from "@/contracts";
 
@@ -49,9 +49,11 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   try {
-    // 標準コンテキストブロック(現在のマップ含む)を注入する(場面の粒度・言い回しとの整合)
-    const boardContext = await buildBoardContext(params.boardId);
-    const result = await refineCard(params.boardId, body, boardContext);
+    // 常時注入コンテキスト(現在のマップ含む)+ 知識 skill の同期
+    // (用語合わせは kb-terms skill を必要なときだけ読む)
+    await syncKnowledgeSkills(params.boardId);
+    const chatContext = await buildChatContext(params.boardId);
+    const result = await refineCard(params.boardId, body, chatContext);
     return NextResponse.json(result);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

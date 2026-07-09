@@ -3,13 +3,14 @@ import { isConfigured, generate } from "@/infrastructure/agent";
 import { loadStoryMap, applyChatTurn } from "@/infrastructure/storage";
 import {
   addChatKnowledge,
-  buildBoardContext,
+  buildChatContext,
   deleteEntry,
   deleteSource,
   getKnowledgeState,
   listOwnEntries,
   reextractSource,
   setSourceEnabled,
+  syncKnowledgeSkills,
   updateEntry,
 } from "@/infrastructure/context";
 import type { KnowledgeToolHandlers } from "@/infrastructure/agent/knowledge-tools";
@@ -77,9 +78,11 @@ export async function POST(request: Request, { params }: Params) {
       // ミューテックス通過後に読み直す(直前のターンの結果を正とする)
       const currentMap = await loadStoryMap(boardId);
 
-      // 標準コンテキストブロック(業務一覧 + 知識 + 共通 + 確定マップ + 現在のマップ)を
-      // system prompt へ注入する(会話メッセージはユーザーの発話のまま手を加えない)
-      const boardContext = await buildBoardContext(boardId, currentMap);
+      // ドメイン知識を kb-* skill としてワークスペースへ同期する
+      // (AI は description を常時見て、必要なときだけ本文を読む)。
+      // 常時注入は業務一覧 + 合意済みマップ + 現在のマップのみ
+      await syncKnowledgeSkills(boardId);
+      const chatContext = await buildChatContext(boardId, currentMap);
 
       // 知識ツールのハンドラ(context のユースケースを結線)。
       // 知識が変更されたら、ターン終了後に全ボードへ contexts を通知する
@@ -141,7 +144,7 @@ export async function POST(request: Request, { params }: Params) {
         },
       };
 
-      const parsed = await generate(boardId, messages, boardContext, knowledgeHandlers);
+      const parsed = await generate(boardId, messages, chatContext, knowledgeHandlers);
 
       // AI 出力を保存してよい形へ整える(正規化・確定要素の保護・表示順の引き継ぎ)。
       // 手順の順序は domain.applyAiUpdate に閉じている。

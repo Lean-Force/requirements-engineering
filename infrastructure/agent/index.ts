@@ -72,15 +72,18 @@ function renderConversation(conversation: ChatMessage[]): string {
 
 /**
  * 会話履歴から「返信 + 更新後マップ」を生成する。
- * boardContext は buildBoardContext の結果(業務一覧 + 知識 + 共通 + 確定マップ +
- * 現在のマップ)。system prompt へ注入するので AI には常に全体が見える。
+ * chatContext は buildChatContext の結果(業務一覧 + 合意済みマップ + 現在のマップ)。
+ * ドメイン知識はワークスペースへ同期済みの kb-* skill(呼び出し元が
+ * syncKnowledgeSkills を済ませておく)から AI が必要なときだけ読む。
  */
 export async function generate(
   boardId: string,
   conversation: ChatMessage[],
-  boardContext: string,
+  chatContext: string,
   knowledgeHandlers?: KnowledgeToolHandlers,
-): Promise<Pick<ChatResponse, "reply" | "storyMap">> {
+): Promise<
+  Pick<ChatResponse, "reply" | "storyMap"> & { usedSkills: string[] }
+> {
   const workspace = workspaceDir(boardId);
   // cwd に指定するため、初回チャット時などまだ無ければ作る(無いと spawn に失敗する)
   await fs.mkdir(workspace, { recursive: true });
@@ -91,9 +94,12 @@ export async function generate(
     options: {
       model: process.env.ANTHROPIC_MODEL || undefined,
       cwd: workspace,
-      // ルール + 標準コンテキストブロックの 1 本の system prompt
-      systemPrompt: withKnowledgeContext(SYSTEM_PROMPT, boardContext),
-      settingSources: [],
+      // ルール + 常時注入コンテキストの 1 本の system prompt
+      systemPrompt: withChatContext(SYSTEM_PROMPT, chatContext),
+      // ワークスペースの .claude/skills(kb-*)を読み込む。
+      // description は常駐提示され、本文は Skill 起動時だけ読まれる
+      settingSources: ["project"],
+      skills: "all",
       // カスタムツール: ボード操作 + (結線されていれば)知識の修正・蓄積
       mcpServers: {
         usm: boardToolsServer(),
@@ -117,10 +123,24 @@ export async function generate(
       ],
       maxTurns,
       outputFormat: { type: "json_schema", schema: CHAT_OUTPUT_SCHEMA },
+      hooks: workspaceGuard(workspace),
     },
   });
 
+  // 実際に読まれた知識 skill(オンデマンド読み込みの監視・eval 用)
+  const usedSkills: string[] = [];
+
   for await (const message of q) {
+    if (message.type === "assistant") {
+      for (const block of message.message.content) {
+        if (block.type !== "tool_use" || block.name !== "Skill") continue;
+        const input = block.input as { command?: string; skill?: string };
+        usedSkills.push(
+          input.skill ?? input.command ?? JSON.stringify(block.input),
+        );
+      }
+      continue;
+    }
     if (message.type !== "result") continue;
 
     if (message.subtype === "success") {
@@ -131,6 +151,7 @@ export async function generate(
           kind: "chat-usage",
           turns: message.num_turns,
           durationMs: message.duration_ms,
+          usedSkills,
           usage: message.usage,
           costUsd: message.total_cost_usd,
         }),
@@ -141,7 +162,7 @@ export async function generate(
       if (!output) {
         throw new Error("モデルから構造化出力が得られませんでした");
       }
-      return output;
+      return { ...output, usedSkills };
     }
 
     // result のエラー種別(ループ上限・構造化出力の失敗など)
@@ -159,12 +180,13 @@ export async function generate(
 
 /**
  * 付箋(行動 / ストーリー)1 枚の本文を推奨形式・ドメイン知識(用語)に沿って推敲する。
- * boardContext(標準コンテキストブロック。現在のマップ含む)を注入する。
+ * chatContext(業務一覧 + 合意済みマップ + 現在のマップ)を注入し、
+ * 用語などのドメイン知識は kb-* skill から必要なときだけ読む。
  */
 export async function refineCard(
   boardId: string,
   req: RefineRequest,
-  boardContext: string,
+  chatContext: string,
 ): Promise<RefineResponse> {
   const workspace = workspaceDir(boardId);
   await fs.mkdir(workspace, { recursive: true });
@@ -185,11 +207,13 @@ export async function refineCard(
     options: {
       model: process.env.ANTHROPIC_MODEL || undefined,
       cwd: workspace,
-      systemPrompt: withKnowledgeContext(REFINE_SYSTEM_PROMPT, boardContext),
-      settingSources: [],
+      systemPrompt: withChatContext(REFINE_SYSTEM_PROMPT, chatContext),
+      settingSources: ["project"],
+      skills: "all",
       allowedTools: [],
-      maxTurns: 4,
+      maxTurns: 6,
       outputFormat: { type: "json_schema", schema: REFINE_SCHEMA },
+      hooks: workspaceGuard(workspace),
     },
   });
 
@@ -568,12 +592,23 @@ ${entriesText}`,
 // ---- 内部 ----------------------------------------------------------------
 
 /**
- * system prompt の末尾に標準コンテキストブロック(業務一覧・ドメイン知識・共通知識・
+ * system prompt の末尾にチャット用の常時注入コンテキスト(業務一覧・
  * 合意済みマップ・現在のマップ)を付ける(空なら素通し)。
+ * ドメイン知識は入れない — kb-* skill から必要なときだけ読む。
+ */
+function withChatContext(systemPrompt: string, chatContext: string): string {
+  if (!chatContext) return systemPrompt;
+  return `${systemPrompt}\n\n---\n\n以下は参照情報(業務一覧・各業務の合意済みマップ・現在のマップ)。\n表記・用語はこの正に合わせること。\n\n${chatContext}`;
+}
+
+/**
+ * system prompt の末尾に標準コンテキストブロック(業務一覧・ドメイン知識全文・
+ * 合意済みマップ・現在のマップ)を付ける(空なら素通し)。
+ * 知識そのものを扱う AI 行動(抽出・エントリ修正・業務判定)用。
  */
 function withKnowledgeContext(systemPrompt: string, boardContext: string): string {
   if (!boardContext) return systemPrompt;
-  return `${systemPrompt}\n\n---\n\n以下は参照情報(業務一覧・ドメイン知識・共通知識・合意済みマップ・現在のマップ)。\n表記・用語はこの正に合わせること。\n\n${boardContext}`;
+  return `${systemPrompt}\n\n---\n\n以下は参照情報(業務一覧・ドメイン知識・合意済みマップ・現在のマップ)。\n表記・用語はこの正に合わせること。\n\n${boardContext}`;
 }
 
 /**
