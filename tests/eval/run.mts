@@ -1,17 +1,20 @@
-// レベル3: AI が知識を「正しく使うか」の eval(実 LLM を呼ぶ)。
-// 知識は system prompt へ全文注入される(選択的読込はない)ため、
-// 判定は「事実がマップ/返信に正しく現れるか・混入しないか」に寄せる。
+// レベル3: AI が知識を「必要なときに読み、正しく使うか」の eval(実 LLM を呼ぶ)。
 //
 //   npm run eval
 //
-// CI 常時ではなく、リリース前・プロンプト変更時に手動で回す想定
-// (1ケース $0.1〜0.3 / 全体で数分)。知識のシードは LLM を使わず
-// エントリを直接書き込むため、テスト対象は「AI が知識を読む・使う」部分だけ。
-//
-// 判定は決定的に寄せる:
-//   - structured output(マップ JSON)への事実の包含/除外
+// フィクスチャは tests/fixtures/complex-bank(複数ボードの複雑システム =
+// SORA銀行 6 業務)。知識は kb-* skill としてオンデマンド読み込みされるため、
+// 判定は次の 3 軸で行う:
+//   - usedSkills(generate が記録する「実際に読んだ skill」)の包含 / 空
+//   - structured output(マップ JSON)への事実の包含 / 除外
 //   - reply への包含
-// LLM のゆれで際どいケースは、期待を「事実の存在」に留めて文言一致を避ける。
+// CI 常時ではなく、リリース前・プロンプト変更時に手動で回す想定
+// (1ケース $0.1〜0.3 / 全体で数分)。LLM のゆれで際どいケースは、
+// 期待を「事実の存在」に留めて文言一致を避ける。
+//
+// 引数でケースを絞れる(名前の部分一致。抽出・矛盾・新業務の
+// パイプライン eval はスキップされる):
+//   npm run eval -- 用語
 
 import { promises as fs } from "fs";
 import os from "os";
@@ -24,301 +27,129 @@ try {
     const m = line.match(/^([A-Z_]+)=(.*)$/);
     if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
   }
-} catch { /* .env.local が無ければ既存の env で動く */ }
-import { detectConflicts, detectNewBusiness, extractKnowledge, extractKnowledgeMulti, generate } from "../../infrastructure/agent";
-import {
-  knowledgeFile,
-  sourcesFile,
-  writeJson,
-} from "../../infrastructure/context/repository";
-import { buildBoardContext } from "../../infrastructure/context/knowledge";
-import { saveStoryMap } from "../../infrastructure/storage";
-import { writeJson } from "../../infrastructure/context/repository";
-import { COMMON_SCOPE } from "../../infrastructure/context/workspace";
-import type { KnowledgeCategory } from "../../contracts";
-
-// ---- シード(LLM を使わずエントリを直接書き込む) ---------------------------
-
-interface SeedEntry {
-  category: KnowledgeCategory;
-  title: string;
-  content: string;
+} catch {
+  /* .env.local が無ければ既存の env で動く */
 }
 
-let seq = 0;
-async function seed(
-  scope: string,
-  fileName: string,
-  entries: SeedEntry[],
-  enabled = true,
-): Promise<void> {
-  const sourceId = `eval-src-${++seq}`;
-  const sources = [
-    {
-      id: sourceId,
-      fileName,
-      enabled,
-      entryCount: entries.length,
-      uploadedAt: "2026-01-01T00:00:00.000Z",
-    },
-  ];
-  // スコープはエントリ単位: 共通スコープへのシードは common エントリになる
-  const knowledge = entries.map((e, i) => ({
-    id: `eval-ent-${seq}-${i}`,
-    sourceId,
-    common: scope === COMMON_SCOPE,
-    ...e,
-  }));
-  await writeJson(sourcesFile(scope), sources);
-  await writeJson(knowledgeFile(scope), knowledge);
-}
+const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "usm-eval-"));
+process.env.DATA_DIR = tmp;
 
-// ---- ケース定義 -------------------------------------------------------------
+// DATA_DIR を確定させてから、データを触るモジュールを読み込む
+const { detectConflicts, detectNewBusiness, extractKnowledge, extractKnowledgeMulti, generate } =
+  await import("../../infrastructure/agent");
+const { buildChatContext, syncKnowledgeSkills } = await import(
+  "../../infrastructure/context/knowledge"
+);
+const { loadStoryMap } = await import("../../infrastructure/storage");
+const { seedComplexBank } = await import("../fixtures/complex-bank");
+
+// ---- チャットのケース定義 -----------------------------------------------------
 
 interface EvalCase {
   name: string;
   boardId: string;
   message: string;
-  /** 会話に添付する現在のマップ(省略時は空マップ) */
+  /** 現在のマップ(省略時はシード済みのボードのマップを使う) */
   map?: unknown;
   mapMustInclude?: string[];
   mapMustExclude?: string[];
   replyMustInclude?: string[];
+  /** 読まれているべき skill(部分一致) */
+  skillsMustInclude?: string[];
+  /** true なら skill を 1 つも読んでいないこと */
+  skillsMustBeEmpty?: boolean;
 }
 
 const CASES: EvalCase[] = [
   {
-    name: "知識を正確に反映 + 矛盾は業務優先",
-    boardId: "eval-soukin",
+    name: "知識(業務ルール)を読んで事実を正確に反映する",
+    boardId: "cx-domestic",
     message:
-      "承認のルールに従って、承認の場面をマップに追加して。金額の閾値も本文に明記して。",
-    mapMustInclude: ["部長", "1,000万"],
-    mapMustExclude: ["500万"], // 共通規程(500万)ではなく業務の知識(1,000万)を採る
+      "組み戻しの場面に、組み戻し手数料の金額を本文に明記したストーリーを追加して。金額は社内の決まりに従って。",
+    mapMustInclude: ["880"],
+    skillsMustInclude: ["kb-flows"],
   },
   {
-    name: "機械的な操作に知識のノイズが混入しない",
-    boardId: "eval-soukin",
+    name: "off にした資料(旧規程)の知識は使われない",
+    boardId: "cx-domestic",
     message:
-      "アクター「テスト太郎」を1人追加して。それ以外は何も変えないで。",
+      "受付の流れに「カットオフを確認する」場面を追加して、カットオフ時刻を本文に明記して。時刻は社内の決まりに従って。",
+    mapMustInclude: ["15:00"],
+    mapMustExclude: ["14:00"], // 旧規程(off)の時刻が見えたら漏れ
+  },
+  {
+    name: "機械的な操作では skill を読まず、知識のノイズも混入しない",
+    boardId: "cx-support",
+    message: "アクター「テスト太郎」を1人追加して。それ以外は何も変えないで。",
     mapMustInclude: ["テスト太郎"],
-    mapMustExclude: ["1,000万"], // 頼んでいない承認ルールを勝手に足さない
+    mapMustExclude: ["880", "15:00"],
+    skillsMustBeEmpty: true,
   },
   {
-    name: "業務間の分離(他業務の知識は存在しない)",
-    boardId: "eval-koza",
+    name: "用語の質問には kb-terms を読んで答える",
+    boardId: "cx-foreign",
     message:
-      "この業務の知識に「送金の部長承認ルール」があればマップに追加して。無ければマップは変えず、reply で無い旨を答えて。",
-    mapMustExclude: ["1,000万"],
+      "SHA / OUR / BEN の違いを reply で説明して。マップは変えないで。",
+    replyMustInclude: ["負担"],
+    skillsMustInclude: ["kb-terms"],
   },
   {
-    name: "off にした資料の知識は使われない",
-    boardId: "eval-off",
+    name: "データ定義(値域)を読んで正確に反映する",
+    boardId: "cx-domestic",
     message:
-      "承認のルールに従って、承認の場面をマップに追加して。金額の閾値が知識にあれば本文に明記して。",
-    mapMustExclude: ["1,000万"],
-  },
-  {
-    name: "データ定義の正確な反映(値域)",
-    boardId: "eval-soukin",
-    message: "送金種別の選択肢を、それぞれストーリーとして明記して追加して。",
+      "送金種別の選択肢を、それぞれストーリーとして受付の場面に明記して追加して。",
     mapMustInclude: ["即時", "予約"],
+    skillsMustInclude: ["kb-data"],
   },
   {
-    name: "共通知識(用語集)に基づいて答える",
-    boardId: "eval-koza",
-    message: "BSAD という言葉の意味を reply で説明して。マップは変えないで。",
-    replyMustInclude: ["基本設計書"],
+    name: "他業務の合意済みマップは skill を読まずに参照できる(常時注入)",
+    boardId: "cx-support",
+    message:
+      "「国内送金」の業務で確定(チーム合意)済みになっている承認まわりの決定を reply で教えて。マップは変えないで。",
+    replyMustInclude: ["1,000万"],
+  },
+  {
+    name: "他業務の合意済みマップとの齟齬を指摘する",
+    boardId: "cx-loan",
+    message:
+      "契約・実行の前に「融資実行用の口座を郵送で申し込み、開設完了まで2週間待つ」という場面を追加して。他の業務ボードで合意済みの内容と食い違う点があれば reply で指摘して。",
+    replyMustInclude: ["eKYC"],
   },
   {
     name: "確定(fixed)要素の変更依頼は拒み、確定解除を案内する",
-    boardId: "eval-soukin",
-    map: {
-      actors: [{ id: "actor-op", name: "オペレーター" }],
-      activities: [
-        {
-          id: "act-1",
-          actions: [
-            {
-              id: "action-1",
-              actorId: "actor-op",
-              text: "承認を得る",
-              fixed: true,
-              stories: [
-                {
-                  id: "story-1",
-                  text: "オペレーターは3億円を超える送金で役員承認を得たい。なぜなら規程で役員決裁が必須だからだ。",
-                  fixed: true,
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    message: "「3億円」のストーリーの金額を1億円に変更して。",
-    mapMustInclude: ["3億円"],
-    mapMustExclude: ["1億円"],
+    boardId: "cx-domestic",
+    message: "「1,000万円」の承認ストーリーの金額を3,000万円に変更して。",
+    mapMustInclude: ["1,000万"],
+    mapMustExclude: ["3,000万"],
     replyMustInclude: ["確定"],
   },
   {
-    name: "小さな流れ(flowName)でグループ化して生成する",
-    boardId: "eval-soukin",
-    message:
-      "送金業務のマップを作って。受付(依頼を受ける・内容を確認する)、審査・承認(承認を得る)、実行(送金を実行する・結果を通知する)の 3 つの小さな流れに分けて。",
-    mapMustInclude: ['"flowName"', "受付", "実行"],
-  },
-  {
-    name: "確定ストーリーがあっても flowName の付与は拒まない",
-    boardId: "eval-soukin",
-    map: {
-      actors: [{ id: "actor-op", name: "オペレーター" }],
-      activities: [
-        {
-          id: "act-1",
-          actions: [
-            {
-              id: "action-1",
-              actorId: "actor-op",
-              text: "送金を受け付ける",
-              fixed: true,
-              stories: [
-                { id: "story-1", text: "オペレーターは内容を確認したい。なぜなら誤送金を防ぎたいからだ。", fixed: true },
-              ],
-            },
-          ],
-        },
-        {
-          id: "act-2",
-          actions: [
-            { id: "action-2", actorId: "actor-op", text: "送金を実行する", stories: [] },
-          ],
-        },
-      ],
-    },
-    message:
-      "場面を意味のまとまりごとに小さな流れに分けて、flowName を付けて。内容は変えないで。",
-    mapMustInclude: ['"flowName"', "オペレーターは内容を確認したい。なぜなら誤送金を防ぎたいからだ。"],
-  },
-  {
     name: "随時の業務を standalone として時系列外に置く",
-    boardId: "eval-soukin",
-    map: {
-      actors: [{ id: "actor-op", name: "オペレーター" }],
-      activities: [
-        {
-          id: "act-1",
-          actions: [
-            { id: "action-1", actorId: "actor-op", text: "送金を受け付ける", stories: [] },
-          ],
-        },
-        {
-          id: "act-2",
-          actions: [
-            { id: "action-2", actorId: "actor-op", text: "送金を実行する", stories: [] },
-          ],
-        },
-      ],
-    },
+    boardId: "cx-support",
     message:
-      "「限度額変更の受付」を場面として追加して。これは送金の流れとは独立で、顧客からいつでも依頼が来る随時対応の業務です。",
-    mapMustInclude: ["限度額", '"standalone":true'],
+      "「振り込め詐欺の注意喚起」を場面として追加して。これは流れとは独立で、随時行う業務です。",
+    mapMustInclude: ["注意喚起", '"standalone":true'],
   },
   {
     name: "リリースラインを切る(MVP と後続を分ける)",
-    boardId: "eval-soukin",
-    map: {
-      actors: [{ id: "actor-op", name: "オペレーター" }],
-      activities: [
-        {
-          id: "act-1",
-          actions: [
-            {
-              id: "action-1",
-              actorId: "actor-op",
-              text: "送金を受け付ける",
-              stories: [
-                { id: "s-必須", text: "オペレーターは送金内容を確認したい。なぜなら誤送金を防ぎたいからだ。" },
-                { id: "s-後回し", text: "オペレーターは自動チェック結果を確認したい。なぜなら効率を上げたいからだ。" },
-                { id: "s-後回し2", text: "オペレーターは統計レポートを見たい。なぜなら改善に役立てたいからだ。" },
-              ],
-            },
-          ],
-        },
-      ],
-    },
+    boardId: "cx-onboarding",
     message:
-      "リリースを MVP と「フェーズ2」に切って。送金内容の確認は必須(MVP)で、統計レポートとチェック結果は後続。",
-    mapMustInclude: ['"release"', '"releases"', "MVP"],
+      "リリースを MVP と「フェーズ2」に切って。申込〜口座開設の流れは MVP、初回ログイン体験の改善は後続。",
+    mapMustInclude: ['"release"', '"releases"', "フェーズ2"],
     replyMustInclude: ["MVP"],
-  },
-  {
-    name: "他業務の合意済みマップを参照して答える",
-    boardId: "eval-koza",
-    message:
-      "「送金処理」の業務で確定(チーム合意)済みになっている承認まわりの決定があれば、reply で教えて。マップは変えないで。",
-    replyMustInclude: ["役員"],
   },
 ];
 
 // ---- 実行 -------------------------------------------------------------------
 
+const filter = process.argv[2];
+
 async function main() {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "usm-eval-"));
-  process.env.DATA_DIR = tmp;
-
-  // 送金業務: 承認ルール(1,000万)+ 送金種別(01/02)
-  await seed("eval-soukin", "送金設計.xlsx", [
-    { category: "flows", title: "送金の承認ルール", content: "1,000万円を超える送金は部長承認が必要。" },
-    { category: "data", title: "送金種別", content: "送金種別の値域: 01:即時 / 02:予約 の2種類。" },
-  ]);
-  // 口座開設業務: 独自ルールのみ(送金の知識は存在しない)
-  await seed("eval-koza", "口座審査.xlsx", [
-    { category: "flows", title: "口座開設の審査", content: "反社チェック NG は即否決。" },
-  ]);
-  // off 検証用: 承認ルールはあるが資料が無効
-  await seed("eval-off", "送金設計.xlsx", [
-    { category: "flows", title: "送金の承認ルール", content: "1,000万円を超える送金は部長承認が必要。" },
-  ], false);
-  // 共通知識: 業務と矛盾する承認規程 + 用語集
-  await seed(COMMON_SCOPE, "全社規程.xlsx", [
-    { category: "flows", title: "承認の全社標準", content: "500万円を超える取引は部長承認が必要(全社標準)。" },
-    { category: "terms", title: "BSAD", content: "BSAD は基本設計書の社内略称。" },
-  ]);
-
-  // 送金業務の「確定済みマップ」(kb-common-maps 経由で他業務から見える)。
-  // 知識シード(1,000万/部長)とは別の事実(3億/役員)にして、マップ由来と判別できるようにする
-  await writeJson(path.join(tmp, "boards.json"), [
-    { id: "eval-soukin", name: "送金処理", createdAt: "2026-01-01T00:00:00.000Z" },
-    { id: "eval-koza", name: "口座開設", createdAt: "2026-01-01T00:00:00.000Z" },
-  ]);
-  await saveStoryMap("eval-soukin", {
-    actors: [{ id: "actor-op", name: "オペレーター" }],
-    activities: [
-      {
-        id: "act-approve",
-        actions: [
-          {
-            id: "action-approve",
-            actorId: "actor-op",
-            text: "承認を得る",
-            fixed: true,
-            stories: [
-              {
-                id: "story-approve",
-                text: "オペレーターは3億円を超える送金で役員承認を得たい。なぜなら規程で役員決裁が必須だからだ。",
-                fixed: true,
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  });
-
+  await seedComplexBank();
   let failed = 0;
 
   // ---- 抽出: 観点別 5 パスの再現率(vs 1 パス)+ common 自動判定 --------------
-  {
+  if (!filter) {
     const started = Date.now();
     // 5 カテゴリの事実を仕込んだフィクスチャ資料(既知の正解 = FACTS)
     const FIXTURE = `# 送金業務 基本設計書(抜粋)
@@ -390,7 +221,7 @@ async function main() {
   }
 
   // ---- 矛盾検出: 実質的な食い違いだけを拾う(補完関係は拾わない) ---------------
-  {
+  if (!filter) {
     const started = Date.now();
     const conflicts = await detectConflicts(
       "新規程.xlsx",
@@ -406,7 +237,7 @@ async function main() {
     const problems: string[] = [];
     const hit = conflicts.find((c) => c.existingSource.includes("旧規程"));
     if (!hit) problems.push("承認閾値の矛盾(旧規程)が検出されていない");
-    else if (!`${hit.newClaim}${hit.existingClaim}`.includes("役員") )
+    else if (!`${hit.newClaim}${hit.existingClaim}`.includes("役員"))
       problems.push("矛盾の主張に具体的な内容(役員承認)が含まれていない");
     if (conflicts.some((c) => c.existingSource.includes("用語集")))
       problems.push("無関係な用語集との誤検出(false positive)がある");
@@ -422,28 +253,28 @@ async function main() {
   }
 
   // ---- 新業務の検知: 別業務は提案し、既存業務の補足は提案しない ----------------
-  {
+  if (!filter) {
     const started = Date.now();
     const [newBiz, sameBiz] = await Promise.all([
       detectNewBusiness(
-        "口座開設フロー.xlsx",
+        "証券口座連携フロー.xlsx",
         [
-          "口座開設の審査: 本人確認書類の確認 → 反社チェック → 開設可否の判定。",
-          "口座開設の必要書類: 本人確認書類、印鑑届、マイナンバー確認書類。",
+          "証券口座連携: 銀行口座と証券口座を紐づけ、余資を自動スイープする。",
+          "スイープの実行タイミング: 毎営業日 16:00。",
         ].join("\n"),
-        ["送金処理"],
+        ["国内送金", "口座開設"],
         "共通知識の管理画面(特定の業務に紐づかない)",
       ),
       detectNewBusiness(
         "送金補足.xlsx",
         "送金の承認ルール補足: 1,000万円超は部長承認。休日受付は翌営業日扱い。",
-        ["送金処理"],
-        "業務「送金処理」のボード",
+        ["国内送金"],
+        "業務「国内送金」のボード",
       ),
     ]);
     const problems: string[] = [];
-    if (!newBiz.isNewBusiness) problems.push("別業務(口座開設)の資料が新業務と判定されていない");
-    else if (!newBiz.name.includes("口座")) problems.push(`業務名が資料に沿っていない: ${newBiz.name}`);
+    if (!newBiz.isNewBusiness) problems.push("別業務(証券口座連携)の資料が新業務と判定されていない");
+    else if (!newBiz.name.includes("証券")) problems.push(`業務名が資料に沿っていない: ${newBiz.name}`);
     if (sameBiz.isNewBusiness) problems.push(`既存業務の補足資料を新業務と誤判定: ${sameBiz.name}`);
     const secs = Math.round((Date.now() - started) / 1000);
     if (problems.length === 0) {
@@ -455,16 +286,17 @@ async function main() {
     }
   }
 
-  for (const c of CASES) {
-    const boardContext = await buildBoardContext(
-      c.boardId,
-      (c.map ?? { actors: [], activities: [] }) as never,
-    );
+  // ---- チャット: skill のオンデマンド読み込みと事実の正確な反映 ----------------
+  const chatCases = CASES.filter((c) => !filter || c.name.includes(filter));
+  for (const c of chatCases) {
+    await syncKnowledgeSkills(c.boardId);
+    const map = (c.map ?? (await loadStoryMap(c.boardId))) as never;
+    const chatContext = await buildChatContext(c.boardId, map);
     const started = Date.now();
     const res = await generate(
       c.boardId,
       [{ role: "user", content: c.message }],
-      boardContext,
+      chatContext,
     );
     const mapJson = JSON.stringify(res.storyMap);
 
@@ -475,10 +307,18 @@ async function main() {
       if (mapJson.includes(t)) problems.push(`マップに「${t}」が混入`);
     for (const t of c.replyMustInclude ?? [])
       if (!res.reply.includes(t)) problems.push(`reply に「${t}」が無い`);
+    for (const s of c.skillsMustInclude ?? [])
+      if (!res.usedSkills.some((u) => u.includes(s)))
+        problems.push(`skill「${s}」を読んでいない(読んだ: ${res.usedSkills.join(", ") || "なし"})`);
+    if (c.skillsMustBeEmpty && res.usedSkills.length > 0)
+      problems.push(`不要な skill を読んだ: ${res.usedSkills.join(", ")}`);
 
     const secs = Math.round((Date.now() - started) / 1000);
     if (problems.length === 0) {
-      console.log(`✅ PASS (${secs}s) ${c.name}`);
+      console.log(
+        `✅ PASS (${secs}s) ${c.name}` +
+        (res.usedSkills.length > 0 ? ` [read: ${res.usedSkills.join(", ")}]` : ""),
+      );
     } else {
       failed++;
       console.log(`❌ FAIL (${secs}s) ${c.name}`);
@@ -488,7 +328,8 @@ async function main() {
   }
 
   await fs.rm(tmp, { recursive: true, force: true });
-  console.log(`\n${CASES.length + 3 - failed}/${CASES.length + 3} passed`);
+  const total = chatCases.length + (filter ? 0 : 3);
+  console.log(`\n${total - failed}/${total} passed`);
   process.exit(failed > 0 ? 1 : 0);
 }
 

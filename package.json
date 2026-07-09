@@ -11,7 +11,8 @@
     "test:unit": "vitest run",
     "check:deps": "depcruise domain infrastructure ui app contracts.ts",
     "eval": "tsx tests/eval/run.mts",
-    "test:system": "tsx tests/system/run.mts"
+    "test:system": "tsx tests/system/run.mts",
+    "seed:complex": "tsx tests/fixtures/seed-complex-bank.mts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.202",
