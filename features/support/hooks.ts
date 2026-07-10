@@ -32,6 +32,14 @@ AfterAll(async () => {
 });
 
 Before(async function (this: UsmWorld, scenario) {
+  // 知識は全ボード共有(_common)のため、前のシナリオの残りが見えないよう
+  // シナリオごとにリセットする(ボードと同じくシナリオ間で独立にする)
+  const common = path.join(E2E_DATA_DIR, "workspaces", "_common");
+  for (const f of ["knowledge.json", "sources.json", "conflicts.json", "board-proposals.json"]) {
+    await fs.rm(path.join(common, f), { force: true });
+  }
+  await fs.rm(path.join(common, "sources"), { recursive: true, force: true });
+
   // シナリオごとに新しいボードを作る(= 空のマップから開始、シナリオ間で独立)
   const res = await fetch(`${BASE_URL}/api/boards`, {
     method: "POST",

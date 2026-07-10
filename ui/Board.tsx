@@ -6,7 +6,7 @@ import * as domain from "@/domain";
 import type { RefineRequest, RefineResponse } from "@/contracts";
 import CardEditModal from "./CardEditModal";
 
-/** 📌 でチャットの対象に選ばれた付箋(ストーリーまたは行動) */
+/** 📌 でチャットの対象に選ばれた付箋(ストーリーまたはタスク) */
 export interface PickTarget {
   kind: "story" | "action";
   id: string;
@@ -22,12 +22,12 @@ interface Props {
   onRefine?: (req: RefineRequest) => Promise<RefineResponse | { error: string }>;
 }
 
-// インライン編集状態(ストーリー / 行動 / アクターを単一の状態で扱う)。
+// インライン編集状態(ストーリー / タスク / アクターを単一の状態で扱う)。
 type Editor =
-  | { mode: "story-pick"; activityId: string } // どのアクターの行動に足すか選択中
+  | { mode: "story-pick"; activityId: string } // どのアクターのタスクに足すか選択中
   | { mode: "story-add"; activityId: string; actionId: string } // 新規ストーリーを入力中
   | { mode: "story-edit"; activityId: string; actionId: string; storyId: string; initial: string; initialFixed: boolean }
-  | { mode: "action-add"; activityId: string; actorId: string } // 空セルに行動を入力中
+  | { mode: "action-add"; activityId: string; actorId: string } // 空セルにタスクを入力中
   | { mode: "action-edit"; activityId: string; actionId: string; initial: string; initialFixed: boolean }
   | { mode: "actor-add" }; // 新規アクター名を入力中
 
@@ -97,7 +97,7 @@ const ACTOR_COLORS = [
   { bg: "#c9e7e6", border: "#92c9c7" },
 ];
 
-const COL_W = 140; // 列(アクティビティ)の幅。全列一定。ストーリーは縦積みなので横に広げない。
+const COL_W = 140; // 列(ステップ)の幅。全列一定。ストーリーは縦積みなので横に広げない。
 
 function noteFontSize(text: string): number {
   const n = [...text].length;
@@ -113,7 +113,7 @@ type Activity = StoryMap["activities"][number];
 export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Props) {
   const { actors, activities } = storyMap;
 
-  // ストーリーの D&D 並び替え(同じ列 = 場面内で上下自由。所属・色は変えない)。
+  // ストーリーの D&D 並び替え(同じ列 = ステップ内で上下自由。所属・色は変えない)。
   // dropHint はインジケータ表示用(対象カードの上半分 = 前に挿入 / 下半分 = 後ろに挿入)。
   const [draggingStory, setDraggingStory] = useState<{
     activityId: string;
@@ -124,10 +124,10 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
   const justDragged = useRef(false);
   const [editor, setEditor] = useState<Editor | null>(null);
 
-  // 随時(時系列外)の場面。正規化で末尾へまとまるため、最初の随時列の前に区切りを描く
+  // 随時(時系列外)のステップ。正規化で末尾へまとまるため、最初の随時列の前に区切りを描く
   const firstStandalone = activities.findIndex((a) => a.standalone === true);
 
-  // 小さな流れ(flowName)のバンド: 連続する同名の場面群を 1 セグメントに。
+  // アクティビティ(flowName)のバンド: 連続する同名のステップ群を 1 セグメントに。
   // 名前なしは単独セグメント、随時はまとめて 1 セグメント(名前なし)。
   type Segment = { key: string; name: string | null; ids: string[]; standalone: boolean };
   const segments: Segment[] = [];
@@ -142,7 +142,7 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
       segments.push({ key: a.id, name: a.flowName ?? null, ids: [a.id], standalone: false });
     }
   }
-  // バンド名の編集状態(key = セグメント先頭の場面 id)
+  // バンド名の編集状態(key = セグメント先頭のステップ id)
   const [flowEdit, setFlowEdit] = useState<{ key: string; value: string } | null>(null);
   const commitFlowName = (seg: Segment) => {
     if (!flowEdit) return;
@@ -203,24 +203,24 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
     onChange(domain.addActivity(storyMap, index));
 
   const removeActivity = (activityId: string) => {
-    if (window.confirm("この場面(列)を削除しますか?配下の行動・ストーリーも消えます。"))
+    if (window.confirm("このステップ(列)を削除しますか?配下のタスク・ストーリーも消えます。"))
       onChange(domain.removeActivity(storyMap, activityId));
   };
 
-  // ---- アクター / 行動 のインライン追加・編集 ----
+  // ---- アクター / タスク のインライン追加・編集 ----
   const commitAddActor = (name: string) => {
     setEditor(null);
     if (name.trim()) onChange(domain.addActor(storyMap, name.trim()));
   };
 
   const removeActor = (actorId: string) => {
-    if (window.confirm("このアクター(行)を削除しますか?配下の行動・ストーリーも消えます。"))
+    if (window.confirm("このアクター(行)を削除しますか?配下のタスク・ストーリーも消えます。"))
       onChange(domain.removeActor(storyMap, actorId));
   };
 
-  // 行動の削除(配下にストーリーがあるときだけ確認)。
+  // タスクの削除(配下にストーリーがあるときだけ確認)。
   const removeActionCard = (activityId: string, actionId: string, storyCount: number) => {
-    if (storyCount === 0 || window.confirm("この行動を削除しますか?配下のストーリーも消えます。"))
+    if (storyCount === 0 || window.confirm("このタスクを削除しますか?配下のストーリーも消えます。"))
       onChange(domain.removeAction(storyMap, activityId, actionId));
   };
 
@@ -246,7 +246,7 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
         domain.findAction(storyMap, activityId, actionId)?.stories.length ?? 0;
       if (
         storyCount === 0 ||
-        window.confirm("この行動を削除しますか?配下のストーリーも消えます。")
+        window.confirm("このタスクを削除しますか?配下のストーリーも消えます。")
       ) {
         onChange(domain.removeAction(storyMap, activityId, actionId));
       }
@@ -268,7 +268,7 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
     return colorOf(a ? a.actorId : (actors[0]?.id ?? ""));
   };
 
-  // 「ストーリーを追加」起点。行動が1つならそのまま入力へ、複数ならアクター選択へ。
+  // 「ストーリーを追加」起点。タスクが1つならそのまま入力へ、複数ならアクター選択へ。
   const startAddStory = (activity: Activity) => {
     if (activity.actions.length === 0) return;
     if (activity.actions.length === 1) {
@@ -315,7 +315,7 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
         </div>
       )}
 
-      {/* ===== activity line(アクター行 × アクティビティ列) ===== */}
+      {/* ===== activity line(アクター行 × ステップ列) ===== */}
       <div className="activity-line">
         {activities.length > 0 && segments.some((g) => !g.standalone) && (
           <div className="flow-bands">
@@ -345,10 +345,10 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                     ) : (
                       <button
                         className="flow-band-name"
-                        title={seg.name ? "この流れの名前を変更" : "この場面群に流れの名前を付ける"}
+                        title={seg.name ? "このアクティビティの名前を変更" : "このステップ群にアクティビティの名前を付ける"}
                         onClick={() => setFlowEdit({ key: seg.key, value: seg.name ?? "" })}
                       >
-                        {seg.name ?? "＋ 流れに名前"}
+                        {seg.name ?? "＋ アクティビティ名"}
                       </button>
                     )}
                   </div>
@@ -372,8 +372,8 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                           className={`standalone-toggle${activity.standalone ? " on" : ""}`}
                           title={
                             activity.standalone
-                              ? "随時(時系列外)の場面。クリックで流れに戻す"
-                              : "時系列の流れに属さない場面(随時・例外)にする"
+                              ? "随時(時系列外)のステップ。クリックで時系列の流れに戻す"
+                              : "時系列の流れに属さないステップ(随時・例外)にする"
                           }
                           onClick={() => toggleStandalone(activity.id, !activity.standalone)}
                         >
@@ -381,7 +381,7 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                         </button>
                         <button
                           className="del-activity"
-                          title="この場面(列)を削除"
+                          title="このステップ(列)を削除"
                           onClick={() => removeActivity(activity.id)}
                         >
                           ×
@@ -423,7 +423,7 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                           {/* 途中挿入(この列の前に。ホバーで表示) */}
                           <button
                             className="insert-activity"
-                            title="ここにアクティビティを挿入"
+                            title="ここにステップを挿入"
                             onClick={() => addActivityAt(gi)}
                           >
                             ＋
@@ -453,7 +453,7 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                               {onPickTarget && (
                                 <button
                                   className="pick-story"
-                                  title="この行動をチャットの対象にする"
+                                  title="このタスクをチャットの対象にする"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     onPickTarget({ kind: "action", id: action.id, text: action.text });
@@ -465,7 +465,7 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                               {!action.fixed && (
                                 <button
                                   className="del-note"
-                                  title="この行動を削除"
+                                  title="このタスクを削除"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     removeActionCard(activity.id, action.id, action.stories.length);
@@ -483,14 +483,14 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                               className="note-input"
                               color={color}
                               initial=""
-                              placeholder="行動(例: 商品を受け取る)"
+                              placeholder="タスク(例: 商品を受け取る)"
                               onCommit={(t) => commitAddAction(activity.id, actor.id, t)}
                               onCancel={() => setEditor(null)}
                             />
                           ) : (
                             <button
                               className="cell-add"
-                              title="行動を追加"
+                              title="タスクを追加"
                               onClick={() =>
                                 setEditor({
                                   mode: "action-add",
@@ -507,10 +507,10 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                       );
                     })}
 
-                    {/* 末尾にアクティビティ追加(ホバーで表示) */}
+                    {/* 末尾にステップ追加(ホバーで表示) */}
                     <button
                       className="add-activity"
-                      title="アクティビティを追加"
+                      title="ステップを追加"
                       onClick={() => addActivityAt()}
                     >
                       ＋
@@ -551,7 +551,7 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
         </div>
       )}
 
-      {/* ===== story line(リリースセクション × アクティビティ列) ===== */}
+      {/* ===== story line(リリースセクション × ステップ列) ===== */}
       {activities.length > 0 && (() => {
         // リリースセクション定義（末尾に「未分類」）
         type RelSection = { release: number | undefined; label: string };
@@ -679,6 +679,9 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                                   onDragLeave={() => setDropHint((h) => (h?.storyId === st.id ? null : h))}
                                   onDrop={(e) => {
                                     e.preventDefault();
+                                    // 親(列)の onDrop = 「空き領域へのドロップは末尾へ」が
+                                    // 二重に発火してこの並び替えを上書きしないようにする
+                                    e.stopPropagation();
                                     if (!draggingStory || draggingStory.storyId === st.id || draggingStory.activityId !== activity.id) return;
                                     const rect = e.currentTarget.getBoundingClientRect();
                                     const after = e.clientY > rect.top + rect.height / 2;
@@ -764,7 +767,11 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                 {activities.map((activity) => (
                   <Fragment key={activity.id}>
                     {flowDivider(activity)}
-                    <div className="step-cell story-col" style={{ width: COL_W }}>
+                    <div
+                      className="step-cell story-col"
+                      data-activity-id={activity.id}
+                      style={{ width: COL_W }}
+                    >
                       {editor?.mode === "story-add" && editor.activityId === activity.id && (
                         <InlineInput
                           multiline
