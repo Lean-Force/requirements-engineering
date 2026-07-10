@@ -1,6 +1,6 @@
 // ストーリーの並び・移動のポリシー。
 //
-// - reorderStoryInColumn: 列(場面)内の表示順だけを変える(所属・色は不変)
+// - reorderStoryInColumn: 列(ステップ)内の表示順だけを変える(所属・色は不変)
 // - moveStory: 行動間の付け替え(現状 UI からは未使用。AI 指示や将来の操作用)
 // - preserveStoryOrder: AI 出力へ表示順を引き継ぐ(storyOrder は AI のスキーマ外)
 
@@ -8,7 +8,7 @@ import { orderedStories } from "./activity";
 import { findAction, findActivity, mapActivity, type StoryMap } from "./story-map";
 
 /**
- * ストーリー列(場面)内での表示順の並び替え。所属(行動)と色は変えない。
+ * ストーリー列(ステップ)内での表示順の並び替え。所属(行動)と色は変えない。
  * toIndex は列の表示順(orderedStories の並び)での挿入位置。
  */
 export function reorderStoryInColumn(
@@ -50,7 +50,7 @@ export function preserveStoryOrder(before: StoryMap, after: StoryMap): StoryMap 
 }
 
 /**
- * ストーリーを移動する(同じ行動内の並び替え / 別の行動・場面への付け替え)。
+ * ストーリーを移動する(同じ行動内の並び替え / 別の行動・ステップへの付け替え)。
  * toIndex は「移動先の行動の stories 配列に挿入する位置」。
  * 対象が見つからない場合は何もしない。
  */

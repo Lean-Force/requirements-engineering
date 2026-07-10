@@ -60,11 +60,11 @@ describe("版履歴の方針", () => {
 
   it("チャット由来の版は編集と畳み込まれず、要約が残る", async () => {
     await saveStoryMap(BOARD, mapWith("一"));
-    await applyChatTurn(BOARD, mapWith("二"), "承認の場面を追加しました", []);
+    await applyChatTurn(BOARD, mapWith("二"), "承認のステップを追加しました", []);
     const versions = await saveStoryMap(BOARD, mapWith("三"));
     expect(versions).toHaveLength(3);
     expect(versions.map((v) => v.source)).toEqual(["edit", "chat", "edit"]);
-    expect(versions[1].summary).toBe("承認の場面を追加しました");
+    expect(versions[1].summary).toBe("承認のステップを追加しました");
   });
 
   it("版は最新 10 件だけ保持し、古いものから捨てる", async () => {

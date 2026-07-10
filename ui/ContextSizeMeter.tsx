@@ -1,7 +1,8 @@
 "use client";
 
-// AI へ注入される標準コンテキストのサイズメーター(モデル上限比)。
-// 知識が育って肥大化したら選択的提示へ切り替える判断材料(TESTING.md / 運用)。
+// AI が参照する情報全体のサイズメーター(モデル上限比)。
+// チャットではドメイン知識は kb-* skill として必要なときだけ読まれるが、
+// 知識管理系(抽出・修正・業務判定)は全文を注入するため、その上限監視に使う。
 
 import type { ContextSize } from "@/contracts";
 
@@ -13,7 +14,7 @@ export default function ContextSizeMeter({ size }: { size: ContextSize }) {
   return (
     <div
       className={`context-size ${level}`}
-      title="チャット・校正・抽出などすべての AI 行動の system prompt に注入される参照情報(業務一覧・知識・共通知識・確定マップ・現在のマップ)の概算サイズ"
+      title="AI が参照する情報(業務一覧・ドメイン知識・合意済みマップ・現在のマップ)の概算サイズ。チャットでは知識は必要なときだけ skill として読まれ、知識の取り込み・修正では全文が渡る"
     >
       <span>
         AI へのコンテキスト: 約 {fmt(size.tokens)} トークン

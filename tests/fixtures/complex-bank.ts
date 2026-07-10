@@ -312,8 +312,8 @@ export const BOARDS: FixtureBoard[] = [
             },
           ],
         },
-        // 1 場面につき同一アクターの action は 1 枚(UI の格子モデル)。
-        // 同じアクターの連続作業は場面を分け、flowName で同じ流れに束ねる
+        // 1 ステップにつき同一アクターの action は 1 枚(UI の格子モデル)。
+        // 同じアクターの連続作業はステップを分け、flowName で同じアクティビティに束ねる
         {
           id: "fx-screening",
           flowName: "コンプライアンス",

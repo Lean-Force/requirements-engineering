@@ -17,7 +17,7 @@ async function withSave(world: UsmWorld, action: () => Promise<void>) {
   ]);
 }
 
-// テスト用の最小マップ(アクター1・アクティビティ1・行動1)を作る。
+// テスト用の最小マップ(アクター1・ステップ1・タスク1)を作る。
 function mapWithAction(actorName: string, actionText: string) {
   return {
     actors: [{ id: "a1", name: actorName }],
@@ -44,7 +44,7 @@ When("ページをリロードする", async function (this: UsmWorld) {
   await expect(this.page.locator(".backbone")).toBeVisible();
 });
 
-// ---- アクター / 行動 / ストーリーのインライン編集 ----
+// ---- アクター / タスク / ストーリーのインライン編集 ----
 
 When("アクター {string} を追加する", async function (this: UsmWorld, name: string) {
   await this.page.locator(".add-actor-add").click();
@@ -54,7 +54,7 @@ When("アクター {string} を追加する", async function (this: UsmWorld, na
   await expect(this.page.locator(".lane-label", { hasText: name })).toBeVisible();
 });
 
-When("アクティビティを1つ追加する", async function (this: UsmWorld) {
+When("ステップを1つ追加する", async function (this: UsmWorld) {
   const before = await this.page.locator(".lane-flow .step-cell").count();
   await withSave(this, () => this.page.locator(".add-activity").first().click());
   await expect
@@ -63,7 +63,7 @@ When("アクティビティを1つ追加する", async function (this: UsmWorld)
 });
 
 When(
-  "{string} の最初の空きセルに行動 {string} を追加する",
+  "{string} の最初の空きセルにタスク {string} を追加する",
   async function (this: UsmWorld, actor: string, text: string) {
     await this.lane(actor).locator(".cell-add").first().click();
     const input = this.page.locator(".note-input");
@@ -73,13 +73,13 @@ When(
   },
 );
 
-When("アクティビティを1つ削除する", async function (this: UsmWorld) {
+When("ステップを1つ削除する", async function (this: UsmWorld) {
   this.page.once("dialog", (d) => d.accept()); // 削除確認(window.confirm)
   await withSave(this, () => this.page.locator(".del-activity").first().click());
 });
 
 When(
-  "{string} の最初の空きセルで行動追加をキャンセルする",
+  "{string} の最初の空きセルでタスク追加をキャンセルする",
   async function (this: UsmWorld, actor: string) {
     await this.lane(actor).locator(".cell-add").first().click();
     const input = this.page.locator(".note-input");
@@ -89,7 +89,7 @@ When(
 );
 
 When(
-  "行動 {string} にストーリー {string} を追加する",
+  "タスク {string} にストーリー {string} を追加する",
   async function (this: UsmWorld, actionText: string, storyText: string) {
     const note = this.page.locator(".note", { hasText: actionText });
     const actionId = await note.getAttribute("data-action-id");
@@ -195,7 +195,7 @@ Then(
 );
 
 Then(
-  "アクティビティ列は {int} 列である",
+  "ステップ列は {int} 列である",
   async function (this: UsmWorld, n: number) {
     await expect(this.page.locator(".activity-head")).toHaveCount(n);
   },
@@ -231,22 +231,22 @@ Given(
 Given("2つの版が保存されている", async function (this: UsmWorld) {
   // 版を 2 つ(古い→新しい)持ち、現在のマップは新しい方。
   await this.seedSession({
-    storyMap: mapWithAction("店員", "新しい場面"),
+    storyMap: mapWithAction("店員", "新しいステップ"),
     messages: [],
     versions: [
       {
         id: "v1",
         createdAt: "2026-06-22T01:00:00.000Z",
         source: "chat",
-        summary: "古い場面の版",
-        storyMap: mapWithAction("店員", "古い場面"),
+        summary: "古いステップの版",
+        storyMap: mapWithAction("店員", "古いステップ"),
       },
       {
         id: "v2",
         createdAt: "2026-06-22T02:00:00.000Z",
         source: "chat",
-        summary: "新しい場面の版",
-        storyMap: mapWithAction("店員", "新しい場面"),
+        summary: "新しいステップの版",
+        storyMap: mapWithAction("店員", "新しいステップ"),
       },
     ],
   });

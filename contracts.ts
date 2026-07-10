@@ -43,16 +43,16 @@ export interface ChatResponse {
   versions?: StoryMapVersionMeta[];
 }
 
-/** 付箋(行動 / ストーリー)の AI 校正リクエスト(/api/boards/[id]/refine) */
+/** 付箋(タスク / ストーリー)の AI 校正リクエスト(/api/boards/[id]/refine) */
 export interface RefineRequest {
   kind: "action" | "story";
   /** 現在の本文 */
   text: string;
-  /** 付箋のアクター名(ストーリーの主語・行動の主体) */
+  /** 付箋のアクター名(ストーリーの主語・タスクの主体) */
   actorName?: string;
-  /** 同じ場面(アクティビティ)にある行動の本文一覧(文脈用) */
+  /** 同じステップにあるタスクの本文一覧(文脈用) */
   sceneActions?: string[];
-  /** ストーリーがぶら下がる行動の本文(kind = story のとき) */
+  /** ストーリーがぶら下がるタスクの本文(kind = story のとき) */
   actionText?: string;
 }
 

@@ -20,8 +20,8 @@ export function enforceFixed(before: StoryMap, after: StoryMap): StoryMap {
 
 /**
  * 確定(fixed)行動(バックボーンの付箋)の保護。
- * 本文・アクター・確定フラグを守る(別アクティビティへの移動は許容)。
- * 消されていた場合は元のアクティビティへ配下ストーリーごと復元する。
+ * 本文・アクター・確定フラグを守る(別ステップへの移動は許容)。
+ * 消されていた場合は元のステップへ配下ストーリーごと復元する。
  */
 export function enforceFixedActions(before: StoryMap, after: StoryMap): StoryMap {
   const fixedActions: { action: Action; activity: Activity }[] = [];

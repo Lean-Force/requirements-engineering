@@ -31,7 +31,7 @@ afterEach(async () => {
   await fs.rm(tmp, { recursive: true, force: true });
 });
 
-/** 場面1: 確定済みの行動 + 確定/未確定ストーリー、場面2: 未確定のみ */
+/** ステップ1: 確定済みの行動 + 確定/未確定ストーリー、ステップ2: 未確定のみ */
 const MAP: StoryMap = {
   actors: [{ id: "actor-1", name: "店員" }],
   activities: [
@@ -68,7 +68,7 @@ describe("マップの知識化(確定断片の注入)", () => {
     expect(context).toContain("【確定】店員「会計する」");
     expect(context).toContain("レシートを渡したい");
     expect(context).not.toContain("ポイントを案内したい"); // 未確定ストーリーは載らない
-    expect(context).not.toContain("袋詰め"); // 確定要素の無い場面は載らない
+    expect(context).not.toContain("袋詰め"); // 確定要素の無いステップは載らない
   });
 
   it("確定要素が無いマップは注入されない", async () => {

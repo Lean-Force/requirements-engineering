@@ -109,13 +109,13 @@ const DOC = `# 送金業務 設計メモ
   check("取り込み → 実抽出 → 自動振り分け → 共通集約", problems);
 }
 
-// 3. チャット(実 LLM): 知識を根拠に承認の場面を追加
+// 3. チャット(実 LLM): 知識を根拠に承認のステップを追加
 let mapAfterChat: Json = { actors: [], activities: [] };
 {
   const res = await chatPost(
     json("POST", {
       messages: [
-        { role: "user", content: "承認のルールに従って、承認の場面をマップに追加して。金額の閾値も本文に明記して。" },
+        { role: "user", content: "承認のルールに従って、承認のステップをマップに追加して。金額の閾値も本文に明記して。" },
       ],
       storyMap: { actors: [], activities: [] },
     }),
@@ -180,7 +180,7 @@ let mapAfterChat: Json = { actors: [], activities: [] };
 
 // 5. 付箋の AI 校正(実 LLM)
 {
-  // 実 UI と同じく、付箋が属する場面の文脈(行動・同じ場面の行動)を渡す
+  // 実 UI と同じく、付箋が属するステップの文脈(行動・同じステップの行動)を渡す
   const res = await refinePost(
     json("POST", {
       kind: "story",

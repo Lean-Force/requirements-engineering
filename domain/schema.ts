@@ -45,12 +45,12 @@ export const STORY_MAP_JSON_SCHEMA: Record<string, unknown> = {
           standalone: {
             type: "boolean",
             description:
-              "時系列(ナラティブフロー)に属さない随時・例外・定期の場面は true。true の場面は配列の末尾に置く",
+              "時系列(ナラティブフロー)に属さない随時・例外・定期のステップは true。true のステップは配列の末尾に置く",
           },
           flowName: {
             type: "string",
             description:
-              "バックボーン内の小さな流れの名前(例: 受付 / 審査・承認 / 実行・通知)。意味のまとまりごとに付け、同じ名前の場面は隣接させる。短い名詞。standalone の場面には付けない",
+              "アクティビティ(連続するステップをまとめる帯)の名前(例: 受付 / 審査・承認 / 実行・通知)。意味のまとまりごとに付け、同じ名前のステップは隣接させる。短い名詞。standalone のステップには付けない",
           },
           actions: {
             type: "array",

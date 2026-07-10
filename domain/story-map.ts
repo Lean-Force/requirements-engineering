@@ -90,9 +90,9 @@ export function normalizeStoryMap(map: StoryMap): StoryMap {
     };
   });
 
-  // 連続した流れ(時系列)を先に、随時・例外の場面を末尾にまとめる。
-  // さらに連続側は「小さな流れ(flowName)」ごとに隣接へクラスタ化する
-  // (流れの初出順・流れ内の元順を保つ。名前なしの場面は単独の塊として扱う)。
+  // 連続した流れ(時系列)を先に、随時・例外のステップを末尾にまとめる。
+  // さらに連続側はアクティビティ(flowName)ごとに隣接へクラスタ化する
+  // (流れの初出順・流れ内の元順を保つ。名前なしのステップは単独の塊として扱う)。
   const flow = activities.filter((a) => a.standalone !== true);
   const standalone = activities.filter((a) => a.standalone === true);
   const order: string[] = [];
@@ -113,7 +113,7 @@ export function normalizeStoryMap(map: StoryMap): StoryMap {
   return { actors, activities: [...clustered, ...standalone], ...(releases ? { releases } : {}) };
 }
 
-/** 指定の場面たちに「小さな流れ」の名前を付ける(空文字で外す)。正規化で隣接が保証される */
+/** 指定のステップたちにアクティビティの名前を付ける(空文字で外す)。正規化で隣接が保証される */
 export function setFlowName(
   map: StoryMap,
   activityIds: string[],
@@ -128,7 +128,7 @@ export function setFlowName(
   });
 }
 
-/** 場面を「随時(時系列外)」⇄「連続の流れ」に切り替える(正規化で並びも追従) */
+/** ステップを「随時(時系列外)」⇄「連続の流れ」に切り替える(正規化で並びも追従) */
 export function setActivityStandalone(
   map: StoryMap,
   activityId: string,
@@ -186,7 +186,7 @@ export function removeActor(map: StoryMap, actorId: string): StoryMap {
   };
 }
 
-/** アクティビティを追加。index 省略で末尾、指定で途中(その位置)に挿入。 */
+/** ステップを追加。index 省略で末尾、指定で途中(その位置)に挿入。 */
 export function addActivity(map: StoryMap, index?: number): StoryMap {
   const activities = [...map.activities];
   const at =
@@ -206,7 +206,7 @@ export function addAction(
   return mapActivity(map, activityId, (act) => withNewAction(act, actorId, text));
 }
 
-/** アクティビティを削除(配下の Action / Story もカスケード削除) */
+/** ステップを削除(配下の Action / Story もカスケード削除) */
 export function removeActivity(map: StoryMap, activityId: string): StoryMap {
   return { ...map, activities: map.activities.filter((a) => a.id !== activityId) };
 }

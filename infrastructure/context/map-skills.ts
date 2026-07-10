@@ -1,7 +1,7 @@
 // マップ(story / バックボーン)の「AI 向けビュー」。
 //
 // マップ自体もドメイン知識である、という位置づけ:
-//   - 確定(fixed)済みの行動・ストーリーは「チームが合意した決定 + なぜなら(理由)」
+//   - 確定(fixed)済みのタスク・ストーリーは「チームが合意した決定 + なぜなら(理由)」
 //   - バックボーンは「業務の流れそのもの」
 // 知識は system prompt へ全文注入される(buildKnowledgeContext)。このモジュールは
 // その材料になる「確定済みマップの断片」を保存時にキャッシュする:
@@ -66,7 +66,7 @@ export function renderMapText(map: StoryMap): string {
   if (scenes.length === 0) return "";
   return [
     `アクター: ${map.actors.map((a) => a.name).join(" / ") || "(未定義)"}`,
-    "【確定】が付いた行動・ストーリーはチーム合意済みの決定。",
+    "【確定】が付いたタスク・ストーリーはチーム合意済みの決定。",
     ...scenes,
   ].join("\n\n");
 }
@@ -74,9 +74,9 @@ export function renderMapText(map: StoryMap): string {
 // ---- 内部: マップ → Markdown -----------------------------------------------
 
 /**
- * 場面ごとの Markdown を組み立てる。
- * fixedOnly = true では確定済みの行動/ストーリーだけを残す
- * (未確定の行動の下の確定ストーリーは、文脈として行動ごと載せる)。
+ * ステップごとの Markdown を組み立てる。
+ * fixedOnly = true では確定済みのタスク/ストーリーだけを残す
+ * (未確定のタスクの下の確定ストーリーは、文脈としてタスクごと載せる)。
  */
 function sceneLines(
   map: StoryMap,
@@ -97,9 +97,9 @@ function sceneLines(
     const tag = activity.standalone
       ? "(随時・時系列外)"
       : activity.flowName
-        ? `(流れ: ${activity.flowName})`
+        ? `(アクティビティ: ${activity.flowName})`
         : "";
-    lines.push(`### 場面${i + 1}${tag}\n${body}`);
+    lines.push(`### ステップ${i + 1}${tag}\n${body}`);
   });
   return lines;
 }

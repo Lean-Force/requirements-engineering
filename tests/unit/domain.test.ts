@@ -20,7 +20,7 @@ import {
 } from "@/domain";
 import type { StoryMap } from "@/domain";
 
-// テスト用の代表的なマップ(2アクター・2場面・確定/表示順の材料つき)
+// テスト用の代表的なマップ(2アクター・2ステップ・確定/表示順の材料つき)
 function sample(): StoryMap {
   return {
     actors: [
@@ -197,7 +197,7 @@ describe("enforceFixed(確定要素の保護)", () => {
     expect(ac1.stories.map((s) => s.id)).toContain("s3");
   });
 
-  it("場面ごと消されたら場面を再生する", () => {
+  it("ステップごと消されたらステップを再生する", () => {
     const b = before();
     const r = enforceFixed(b, { actors: b.actors, activities: [] });
     const act1 = r.activities.find((a) => a.id === "act1")!;
@@ -258,7 +258,7 @@ describe("applyAiUpdate(AI 出力の取り込みパイプライン)", () => {
   });
 });
 
-describe("随時(standalone)の場面 — 連続と非連続の区別", () => {
+describe("随時(standalone)のステップ — 連続と非連続の区別", () => {
   const flow = (id: string) => ({
     id,
     actions: [{ id: `ac-${id}`, actorId: "a1", text: id, stories: [] }],
@@ -303,7 +303,7 @@ describe("小さな流れ(flowName)のクラスタ化", () => {
     actions: [{ id: `ac-${id}`, actorId: "a1", text: id, stories: [] }],
   });
 
-  it("normalize: 同じ流れの場面は初出順で隣接にまとまり、名前なしは単独で順序を保つ", () => {
+  it("normalize: 同じ流れのステップは初出順で隣接にまとまり、名前なしは単独で順序を保つ", () => {
     const m = normalizeStoryMap({
       actors: [{ id: "a1", name: "A" }],
       activities: [
@@ -319,7 +319,7 @@ describe("小さな流れ(flowName)のクラスタ化", () => {
     expect(m.activities[4]).not.toHaveProperty("flowName");
   });
 
-  it("随時の場面には flowName が付かない(正規化で除去)", () => {
+  it("随時のステップには flowName が付かない(正規化で除去)", () => {
     const m = normalizeStoryMap({
       actors: [{ id: "a1", name: "A" }],
       activities: [{ ...scene("随時1", "受付"), standalone: true }],
@@ -328,7 +328,7 @@ describe("小さな流れ(flowName)のクラスタ化", () => {
     expect(m.activities[0]).not.toHaveProperty("flowName");
   });
 
-  it("setFlowName: 場面群への命名・改名・解除(空文字)ができる", () => {
+  it("setFlowName: ステップ群への命名・改名・解除(空文字)ができる", () => {
     const base = normalizeStoryMap({
       actors: [{ id: "a1", name: "A" }],
       activities: [scene("一"), scene("二")],

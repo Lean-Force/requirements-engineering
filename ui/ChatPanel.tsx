@@ -8,7 +8,7 @@ interface Props {
   loading: boolean;
   /** 他のメンバーの AI ターンが進行中(共有ボードのため入力をロックする) */
   remoteBusy?: boolean;
-  /** ボードの 📌 で選択中の付箋(ストーリー / 行動。次の送信の対象として AI に渡る) */
+  /** ボードの 📌 で選択中の付箋(ストーリー / タスク。次の送信の対象として AI に渡る) */
   selectedTarget?: { kind: "story" | "action"; id: string; text: string } | null;
   onClearSelection?: () => void;
   onSend: (text: string) => void;
@@ -106,7 +106,7 @@ export default function ChatPanel({
             <ul>
               <li>「ECサイトを作りたい。商品検索とカート、決済機能が必要」</li>
               <li>「決済にクレジットカードとコンビニ払いを追加して」</li>
-              <li>「支払いの場面に、領収書を受け取るストーリーを足して」</li>
+              <li>「支払いのステップに、領収書を受け取るストーリーを足して」</li>
             </ul>
           </div>
         )}
@@ -141,7 +141,7 @@ export default function ChatPanel({
       {selectedTarget && (
         <div className="chat-selection">
           <span className="chat-selection-label">
-            📌 選択中の{selectedTarget.kind === "story" ? "ストーリー" : "行動"}
+            📌 選択中の{selectedTarget.kind === "story" ? "ストーリー" : "タスク"}
           </span>
           <span className="chat-selection-text" title={selectedTarget.text}>
             {selectedTarget.text}

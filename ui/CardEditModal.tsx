@@ -4,7 +4,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import type { RefineResponse } from "@/contracts";
 
-// 付箋(行動 / ストーリー)編集モーダル。Cmd/Ctrl+Enter 保存 / Esc 取消。空で保存すると削除。
+// 付箋(タスク / ストーリー)編集モーダル。Cmd/Ctrl+Enter 保存 / Esc 取消。空で保存すると削除。
 // 確定(fix)中は本文編集・削除を無効化する(先に確定を解除する)。
 // ✨ AI 校正: 現在の本文の推敲案(推奨形式・ドメイン知識の用語に沿う)を提示し、ワンクリックで差し替える。
 // PanZoom の transform の影響を受けないよう body へポータルで出す。
@@ -31,10 +31,10 @@ export default function CardEditModal({
   const [refining, setRefining] = useState(false);
   const [proposal, setProposal] = useState<RefineResponse | null>(null);
   const [refineError, setRefineError] = useState<string | null>(null);
-  const title = kind === "action" ? "行動を編集" : "ストーリーを編集";
+  const title = kind === "action" ? "タスクを編集" : "ストーリーを編集";
   const placeholder =
     kind === "action"
-      ? "行動(例: 商品を受け取る)"
+      ? "タスク(例: 商品を受け取る)"
       : "ストーリー(例: 店員は…したい。なぜなら…だからだ。)";
   const recommendHint =
     kind === "action"

@@ -28,20 +28,20 @@ async function seedMap(
 }
 
 Given(
-  "連続の場面 {string} と随時の場面 {string} があるマップ",
+  "連続のステップ {string} と随時のステップ {string} があるマップ",
   async function (this: UsmWorld, flowText: string, standaloneText: string) {
     await seedMap(this, [{ text: flowText }, { text: standaloneText, standalone: true }]);
   },
 );
 
 Given(
-  "連続の場面 {string} と連続の場面 {string} があるマップ",
+  "連続のステップ {string} と連続のステップ {string} があるマップ",
   async function (this: UsmWorld, a: string, b: string) {
     await seedMap(this, [{ text: a }, { text: b }]);
   },
 );
 
-Then("随時バッジの付いた場面が {int} つ見える", async function (this: UsmWorld, count: number) {
+Then("随時バッジの付いたステップが {int} つ見える", async function (this: UsmWorld, count: number) {
   await expect(this.page.locator(".standalone-toggle.on")).toHaveCount(count);
 });
 
@@ -51,9 +51,9 @@ Then("流れと随時の間に区切り線が見える", async function (this: U
 });
 
 Then(
-  "随時の場面 {string} は右端の列にある",
+  "随時のステップ {string} は右端の列にある",
   async function (this: UsmWorld, text: string) {
-    // アクター行の最後の列(step-cell)がその行動を含み、standalone スタイルであること
+    // アクター行の最後の列(step-cell)がそのタスクを含み、standalone スタイルであること
     const cells = this.page.locator(".lane .step-cell.activity-cell");
     const last = cells.last();
     await expect(last).toContainText(text);
@@ -61,8 +61,8 @@ Then(
   },
 );
 
-When("場面 {string} を随時に切り替える", async function (this: UsmWorld, text: string) {
-  // 対象の行動を含む列の index を求め、同じ index のヘッダーのトグルを押す
+When("ステップ {string} を随時に切り替える", async function (this: UsmWorld, text: string) {
+  // 対象のタスクを含む列の index を求め、同じ index のヘッダーのトグルを押す
   const cells = this.page.locator(".lane .step-cell.activity-cell");
   const count = await cells.count();
   let index = -1;
@@ -85,7 +85,7 @@ When("場面 {string} を随時に切り替える", async function (this: UsmWor
 });
 
 Given(
-  "流れ {string} の場面 {string} と流れ {string} の場面 {string} があるマップ",
+  "流れ {string} のステップ {string} と流れ {string} のステップ {string} があるマップ",
   async function (this: UsmWorld, f1: string, t1: string, f2: string, t2: string) {
     await seedMap(this, [
       { text: t1, flowName: f1 },
@@ -95,7 +95,7 @@ Given(
 );
 
 Then(
-  "流れバンド {string} と {string} が見える",
+  "アクティビティバンド {string} と {string} が見える",
   async function (this: UsmWorld, a: string, b: string) {
     await expect(this.page.locator(".flow-band-name", { hasText: a })).toBeVisible();
     await expect(this.page.locator(".flow-band-name", { hasText: b })).toBeVisible();
@@ -103,7 +103,7 @@ Then(
 );
 
 When(
-  "流れバンド {string} の名前を {string} に変える",
+  "アクティビティバンド {string} の名前を {string} に変える",
   async function (this: UsmWorld, from: string, to: string) {
     await this.page.locator(".flow-band-name", { hasText: from }).click();
     const input = this.page.locator(".flow-band-input");
