@@ -16,6 +16,7 @@
 //   ANTHROPIC_API_KEY         : (ローカル開発向け)Anthropic API 直結の場合
 //   CLAUDE_LOCAL_AUTH=1       : (ローカル開発向け)このマシンの Claude Code ログインを使う
 //   CHAT_MAX_TURNS            : エージェントループの上限(省略時 24)
+//   CHAT_HISTORY_MESSAGES     : プロンプトに含める会話履歴の直近件数(省略時 60)
 
 import { promises as fs } from "fs";
 import path from "path";
@@ -43,6 +44,7 @@ import {
   extractSubagentPrompt,
   extractSystemPrompt,
   REFINE_SYSTEM_PROMPT,
+  SUMMARIZE_SYSTEM_PROMPT,
   SYSTEM_PROMPT,
 } from "./prompts";
 import {
@@ -52,6 +54,7 @@ import {
   ENTRY_REVISE_SCHEMA,
   EXTRACT_SCHEMA,
   REFINE_SCHEMA,
+  SUMMARIZE_SCHEMA,
 } from "./schema";
 
 /** LLM の接続設定があるか(Bedrock / Anthropic API 直結 / ローカル認証のいずれか) */
@@ -63,11 +66,23 @@ export function isConfigured(): boolean {
   );
 }
 
-/** 会話履歴を 1 本のプロンプトに畳む(Agent SDK の query は単一プロンプト入力) */
-function renderConversation(conversation: ChatMessage[]): string {
-  return conversation
+/**
+ * 会話履歴を 1 本のプロンプトに畳む(Agent SDK の query は単一プロンプト入力)。
+ * 古い経緯は要約(infrastructure/conversation の compaction)で渡し、
+ * ここには直近の原文だけが来る想定。要約が無い場合も、プロンプトが際限なく
+ * 肥大しないよう直近 CHAT_HISTORY_MESSAGES 件(既定 60)に切る(安全弁)。
+ */
+function renderConversation(
+  conversation: ChatMessage[],
+  historySummary?: string,
+): string {
+  const limit = Number(process.env.CHAT_HISTORY_MESSAGES || 60);
+  const recent = conversation
+    .slice(-limit)
     .map((m) => `[${m.role === "user" ? "ユーザー" : "あなた(過去の返信)"}]\n${m.content}`)
     .join("\n\n");
+  if (!historySummary) return recent;
+  return `[これまでの経緯の要約(古い会話は原文ではなくこの要約で渡している。決定・指示はこれに従う)]\n${historySummary}\n\n[以降は直近の会話の原文]\n\n${recent}`;
 }
 
 /**
@@ -81,6 +96,7 @@ export async function generate(
   conversation: ChatMessage[],
   chatContext: string,
   knowledgeHandlers?: KnowledgeToolHandlers,
+  historySummary?: string,
 ): Promise<
   Pick<ChatResponse, "reply" | "storyMap"> & { usedSkills: string[] }
 > {
@@ -90,7 +106,7 @@ export async function generate(
   const maxTurns = Number(process.env.CHAT_MAX_TURNS || 12);
 
   const q = query({
-    prompt: renderConversation(conversation),
+    prompt: renderConversation(conversation, historySummary),
     options: {
       model: process.env.ANTHROPIC_MODEL || undefined,
       cwd: workspace,
@@ -179,7 +195,7 @@ export async function generate(
 // ---- 付箋の校正(推敲) -----------------------------------------------------
 
 /**
- * 付箋(行動 / ストーリー)1 枚の本文を推奨形式・ドメイン知識(用語)に沿って推敲する。
+ * 付箋(タスク / ストーリー)1 枚の本文を推奨形式・ドメイン知識(用語)に沿って推敲する。
  * chatContext(業務一覧 + 合意済みマップ + 現在のマップ)を注入し、
  * 用語などのドメイン知識は kb-* skill から必要なときだけ読む。
  */
@@ -191,13 +207,13 @@ export async function refineCard(
   const workspace = workspaceDir(boardId);
   await fs.mkdir(workspace, { recursive: true });
 
-  const kindLabel = req.kind === "story" ? "ストーリー" : "行動";
+  const kindLabel = req.kind === "story" ? "ストーリー" : "タスク";
   const context = [
     req.actorName ? `アクター: ${req.actorName}` : null,
     req.sceneActions?.length
-      ? `同じ場面の行動: ${req.sceneActions.join(" / ")}`
+      ? `同じステップのタスク: ${req.sceneActions.join(" / ")}`
       : null,
-    req.actionText ? `ぶら下がっている行動: ${req.actionText}` : null,
+    req.actionText ? `ぶら下がっているタスク: ${req.actionText}` : null,
   ]
     .filter((s): s is string => s !== null)
     .join("\n");
@@ -241,6 +257,59 @@ export async function refineCard(
     throw new Error(`校正に失敗しました: ${errors}`);
   }
   throw new Error("校正で有効な応答が得られませんでした");
+}
+
+// ---- 会話履歴の要約(compaction) ---------------------------------------------
+
+/**
+ * 古い会話を「決定事項・理由・指示・未解決点」を保持した要約に圧縮する。
+ * previousSummary があればそれと統合した新しい要約を返す(rolling summary)。
+ * 呼び出しタイミング・永続化は infrastructure/conversation が管理する。
+ */
+export async function summarizeHistory(
+  previousSummary: string | undefined,
+  messages: ChatMessage[],
+): Promise<string> {
+  await fs.mkdir(dataRoot(), { recursive: true });
+  const body = messages
+    .map((m) => `[${m.role === "user" ? "ユーザー" : "AI"}]\n${m.content}`)
+    .join("\n\n");
+  const q = query({
+    prompt: `${previousSummary ? `# これまでの要約\n\n${previousSummary}\n\n` : ""}# 追加の会話\n\n${body}`,
+    options: {
+      model: process.env.ANTHROPIC_MODEL || undefined,
+      cwd: dataRoot(),
+      systemPrompt: SUMMARIZE_SYSTEM_PROMPT,
+      settingSources: [],
+      allowedTools: [],
+      maxTurns: 2,
+      outputFormat: { type: "json_schema", schema: SUMMARIZE_SCHEMA },
+    },
+  });
+
+  for await (const message of q) {
+    if (message.type !== "result") continue;
+    if (message.subtype === "success") {
+      console.log(
+        JSON.stringify({
+          at: new Date().toISOString(),
+          kind: "summarize-usage",
+          messages: messages.length,
+          usage: message.usage,
+          costUsd: message.total_cost_usd,
+        }),
+      );
+      const output = message.structured_output as { summary: string } | undefined;
+      if (!output) throw new Error("会話の要約が得られませんでした");
+      return output.summary;
+    }
+    const errors =
+      "errors" in message && Array.isArray(message.errors)
+        ? message.errors.join(" / ")
+        : message.subtype;
+    throw new Error(`会話の要約に失敗しました: ${errors}`);
+  }
+  throw new Error("会話の要約で有効な応答が得られませんでした");
 }
 
 // ---- ドメイン知識の抽出 -----------------------------------------------------

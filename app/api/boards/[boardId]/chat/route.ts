@@ -14,6 +14,7 @@ import {
   updateEntry,
 } from "@/infrastructure/context";
 import type { KnowledgeToolHandlers } from "@/infrastructure/agent/knowledge-tools";
+import { prepareConversation } from "@/infrastructure/conversation";
 import { withChatLock } from "@/infrastructure/chat-lock";
 import { emit } from "@/infrastructure/events";
 import { getBoard } from "@/infrastructure/boards";
@@ -84,6 +85,9 @@ export async function POST(request: Request, { params }: Params) {
       await syncKnowledgeSkills(boardId);
       const chatContext = await buildChatContext(boardId, currentMap);
 
+      // 会話を「古い経緯の要約 + 直近の原文」に整理する(必要なときだけ要約を更新)
+      const { summary, recent } = await prepareConversation(boardId, messages);
+
       // 知識ツールのハンドラ(context のユースケースを結線)。
       // 知識が変更されたら、ターン終了後に全ボードへ contexts を通知する
       let knowledgeMutated = false;
@@ -144,7 +148,7 @@ export async function POST(request: Request, { params }: Params) {
         },
       };
 
-      const parsed = await generate(boardId, messages, chatContext, knowledgeHandlers);
+      const parsed = await generate(boardId, recent, chatContext, knowledgeHandlers, summary);
 
       // AI 出力を保存してよい形へ整える(正規化・確定要素の保護・表示順の引き継ぎ)。
       // 手順の順序は domain.applyAiUpdate に閉じている。

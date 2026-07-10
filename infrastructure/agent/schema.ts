@@ -56,6 +56,19 @@ export const REFINE_SCHEMA: Record<string, unknown> = {
   },
 };
 
+/** 会話履歴の要約(compaction)の構造化出力スキーマ */
+export const SUMMARIZE_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["summary"],
+  properties: {
+    summary: {
+      type: "string",
+      description: "これまでの経緯の要約(決定事項・理由・指示・未解決点を保持した Markdown)",
+    },
+  },
+};
+
 /** エントリ修正案(revise)の構造化出力スキーマ */
 export const ENTRY_REVISE_SCHEMA: Record<string, unknown> = {
   type: "object",

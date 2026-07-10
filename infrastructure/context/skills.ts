@@ -108,6 +108,10 @@ export async function syncSkillsDir(
   for (const skill of skills) {
     const dir = path.join(skillsRoot, skill.name);
     await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(path.join(dir, "SKILL.md"), skill.markdown, "utf-8");
+    // チャットと推敲が同時に同期しても部分的な内容が読まれないよう、
+    // tmp へ書いて rename(同一 FS 上でアトミック)で置き換える
+    const tmp = path.join(dir, `.SKILL.md.tmp-${process.pid}`);
+    await fs.writeFile(tmp, skill.markdown, "utf-8");
+    await fs.rename(tmp, path.join(dir, "SKILL.md"));
   }
 }
