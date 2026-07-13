@@ -16,6 +16,7 @@ export default function CardEditModal({
   onCommit,
   onCancel,
   onRefine,
+  onPbi,
 }: {
   kind: "action" | "story";
   initial: string;
@@ -25,6 +26,8 @@ export default function CardEditModal({
   onCancel: () => void;
   /** AI 校正(未指定ならボタン非表示)。エラー時は文字列を返す */
   onRefine?: (text: string) => Promise<RefineResponse | { error: string }>;
+  /** PBI 化(EARS 記法の要求へ変換。ストーリーのみ。未指定ならボタン非表示) */
+  onPbi?: () => void;
 }) {
   const [text, setText] = useState(initial);
   const [fixed, setFixed] = useState(initialFixed);
@@ -136,6 +139,16 @@ export default function CardEditModal({
                 title="推奨形式・ドメイン知識の用語に沿った推敲案を AI に出してもらう"
               >
                 {refining ? "AI が推敲中…" : "✨ AI 校正"}
+              </button>
+            )}
+            {kind === "story" && onPbi && (
+              <button
+                className="story-modal-refine"
+                onClick={onPbi}
+                disabled={text.trim() === ""}
+                title="このストーリーを PBI(EARS 記法の要求つき)へ変換する"
+              >
+                📋 PBI 化
               </button>
             )}
           </div>

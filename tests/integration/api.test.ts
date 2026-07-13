@@ -28,6 +28,7 @@ import {
   GET as discussionsGet,
   POST as discussionsPost,
 } from "@/app/api/boards/[boardId]/discussions/route";
+import { POST as pbiPost } from "@/app/api/boards/[boardId]/pbi/route";
 import {
   DELETE as discussionDelete,
   PATCH as discussionPatch,
@@ -136,6 +137,14 @@ describe("LLM を跨ぐルートのバリデーション(200 経路は L5 が担
       body: new FormData(),
     });
     expect((await contextsPost(emptyForm, params())).status).toBe(400);
+  });
+
+  it("PBI 化: storyId 不足 400 / 存在しないストーリー 404(LLM を呼ぶ前に弾く)", async () => {
+    const bad = await pbiPost(json("POST", {}), params());
+    expect(bad.status).toBe(400);
+    // LLM 未設定の環境では設定エラー(500)が先に返る
+    const noLlm = await pbiPost(json("POST", { storyId: "s-nai" }), params());
+    expect(noLlm.status).toBe(500);
   });
 
   it("校正: 入力不正は 400 が先、設定不足は 500", async () => {

@@ -61,6 +61,51 @@ export const REFINE_SCHEMA: Record<string, unknown> = {
   },
 };
 
+/** PBI 化(EARS 記法の要求つきバックログアイテム)の構造化出力スキーマ */
+export const PBI_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["title", "userStory", "background", "requirements", "openQuestions"],
+  properties: {
+    title: { type: "string", description: "PBI の短いタイトル(動詞で終わる作業名)" },
+    userStory: {
+      type: "string",
+      description: "元のユーザーストーリー(「◯◯は〜したい。なぜなら〜だからだ。」)",
+    },
+    background: {
+      type: "string",
+      description: "背景・文脈(なぜなら以降の理由 + 関係する合意済みの決定や知識の要点)",
+    },
+    requirements: {
+      type: "array",
+      description: "EARS 記法の要求(受入基準)。各行が 5 パターンのいずれかに従う",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["pattern", "text"],
+        properties: {
+          pattern: {
+            type: "string",
+            enum: ["ubiquitous", "event", "state", "unwanted", "optional"],
+            description: "使用した EARS パターン",
+          },
+          text: {
+            type: "string",
+            description:
+              "要求文。日本語 EARS 形式(例: 「〜のとき、システムは〜すること。」)",
+          },
+        },
+      },
+    },
+    openQuestions: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "未決事項(未解決の論点など、要求化できないもの)。無ければ空配列",
+    },
+  },
+};
+
 /** 会話履歴の要約(compaction)の構造化出力スキーマ */
 export const SUMMARIZE_SCHEMA: Record<string, unknown> = {
   type: "object",

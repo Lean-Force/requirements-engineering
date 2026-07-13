@@ -24,6 +24,8 @@ interface Props {
   openDiscussionsOf?: (targetId: string) => DiscussionPoint[];
   /** 💬 から論点モーダルを開く(未指定ならバッジ非表示) */
   onOpenDiscussions?: (target: DiscussionTarget, label: string) => void;
+  /** ストーリーの PBI 化(EARS)。未指定ならボタン非表示 */
+  onGeneratePbi?: (storyId: string, storyText: string) => void;
 }
 
 // インライン編集状態(ストーリー / タスク / アクターを単一の状態で扱う)。
@@ -114,7 +116,7 @@ function noteFontSize(text: string): number {
 
 type Activity = StoryMap["activities"][number];
 
-export default function Board({ storyMap, onChange, onPickTarget, onRefine, openDiscussionsOf, onOpenDiscussions }: Props) {
+export default function Board({ storyMap, onChange, onPickTarget, onRefine, openDiscussionsOf, onOpenDiscussions, onGeneratePbi }: Props) {
   // 未解決の論点(無指定なら空)。議論中の視覚状態とボード上の論点付箋に使う
   const openDisc = (id: string) => openDiscussionsOf?.(id) ?? [];
   const { actors, activities } = storyMap;
@@ -898,6 +900,13 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine, open
             commitEditStory(editor.activityId, editor.actionId, editor.storyId, t, fixed)
           }
           onCancel={() => setEditor(null)}
+          onPbi={
+            onGeneratePbi &&
+            (() => {
+              onGeneratePbi(editor.storyId, editor.initial);
+              setEditor(null);
+            })
+          }
           onRefine={
             onRefine &&
             ((text) => {

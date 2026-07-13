@@ -9,6 +9,7 @@ import ChatPanel from "@/ui/ChatPanel";
 import HistoryPanel from "@/ui/HistoryPanel";
 import ContextPanel from "@/ui/ContextPanel";
 import DiscussionPanel, { type DiscussionScope } from "@/ui/DiscussionPanel";
+import PbiModal from "@/ui/PbiModal";
 import BoardSwitcher from "@/ui/BoardSwitcher";
 import { useBoardEvents } from "@/ui/hooks/useBoardEvents";
 import { useUndoRedo } from "@/ui/hooks/useUndoRedo";
@@ -69,6 +70,8 @@ export default function BoardPage({ params }: Props) {
   // 論点(議論ポイント)。SSE の discussions 通知で再取得して全員に同期する
   const [discussions, setDiscussions] = useState<DiscussionPoint[]>([]);
   const [discussionScope, setDiscussionScope] = useState<DiscussionScope | null>(null);
+  // PBI 化(EARS)の対象ストーリー(モーダルを開くと生成が走る)
+  const [pbiTarget, setPbiTarget] = useState<{ storyId: string; storyText: string } | null>(null);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   // ボードの 📌 で選んだ付箋(ストーリー / 行動。次のチャット送信の対象として AI に渡す)
   const [selectedTarget, setSelectedTarget] = useState<PickTarget | null>(null);
@@ -642,6 +645,7 @@ export default function BoardPage({ params }: Props) {
                   discussions.filter((d) => d.status === "open" && d.target.id === id)
                 }
                 onOpenDiscussions={(target, label) => setDiscussionScope({ target, label })}
+                onGeneratePbi={(storyId, storyText) => setPbiTarget({ storyId, storyText })}
               />
             </PanZoom>
           ) : (
@@ -654,6 +658,14 @@ export default function BoardPage({ params }: Props) {
             restoringId={restoringId}
             onRestore={restoreVersion}
             onClose={() => setShowHistory(false)}
+          />
+        )}
+        {pbiTarget && (
+          <PbiModal
+            apiBase={api}
+            storyId={pbiTarget.storyId}
+            storyText={pbiTarget.storyText}
+            onClose={() => setPbiTarget(null)}
           />
         )}
         {discussionScope && (

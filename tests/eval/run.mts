@@ -36,8 +36,9 @@ const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "usm-eval-"));
 process.env.DATA_DIR = tmp;
 
 // DATA_DIR を確定させてから、データを触るモジュールを読み込む
-const { detectConflicts, detectNewBusiness, extractKnowledge, extractKnowledgeMulti, generate, refineCard } =
+const { detectConflicts, detectNewBusiness, extractKnowledge, extractKnowledgeMulti, generate, generatePbi, refineCard } =
   await import("../../infrastructure/agent");
+const { classifyEars } = await import("../../infrastructure/agent/ears");
 const { buildChatContext, syncKnowledgeSkills } = await import(
   "../../infrastructure/context/knowledge"
 );
@@ -494,6 +495,52 @@ async function main() {
       failed++;
       console.log(`❌ FAIL (${secs}s) 推敲: ストーリーを推奨形式に整える`);
       for (const p of problems) console.log(`   - ${p}`);
+    }
+  }
+
+  // ---- PBI 化: EARS 記法・知識の正確な反映・未解決論点の未決事項化 --------------
+  if (selected("PBI 化: EARS 記法と知識・論点の反映") && ++total) {
+    const started = Date.now();
+    // 対象ストーリーに未解決の論点を付けておく → openQuestions に入るはず
+    await addDiscussion(
+      "cx-domestic",
+      { kind: "story", id: "dm-s4" },
+      "部長不在時の代理承認者を誰にするか未決",
+    );
+    await syncKnowledgeSkills("cx-domestic");
+    const chatContext = await buildChatContext("cx-domestic");
+    const pbi = await generatePbi(
+      "cx-domestic",
+      {
+        storyText:
+          "部長は、1,000万円を超える送金を自分の承認で通したい。なぜなら送金業務規程で部長承認が必須と定められているからだ。",
+        actorName: "部長",
+        actionText: "高額送金を承認する",
+        sceneActions: ["限度額と残高をチェックする", "高額送金を承認する"],
+        flowName: "審査・承認",
+      },
+      chatContext,
+    );
+
+    const problems: string[] = [];
+    const allText = JSON.stringify(pbi);
+    if (!allText.includes("1,000万")) problems.push("知識の承認閾値(1,000万)が反映されていない");
+    if (pbi.requirements.length < 3)
+      problems.push(`要求が少なすぎる: ${pbi.requirements.length} 件`);
+    for (const r of pbi.requirements)
+      if (!classifyEars(r.text)) problems.push(`EARS 形式外の要求: ${r.text.slice(0, 60)}`);
+    if (!pbi.openQuestions.some((q) => q.includes("代理")))
+      problems.push(`未解決の論点が未決事項に入っていない: ${JSON.stringify(pbi.openQuestions)}`);
+
+    const secs = Math.round((Date.now() - started) / 1000);
+    if (problems.length === 0) {
+      console.log(`✅ PASS (${secs}s) PBI 化: EARS 記法と知識・論点の反映`);
+      console.log(`   要求(EARS):\n${pbi.requirements.map((r) => `   - [${r.pattern}] ${r.text}`).join("\n")}`);
+      console.log(`   未決事項: ${pbi.openQuestions.join(" / ")}`);
+    } else {
+      failed++;
+      console.log(`❌ FAIL (${secs}s) PBI 化: EARS 記法と知識・論点の反映`);
+      for (const pr of problems) console.log(`   - ${pr}`);
     }
   }
 

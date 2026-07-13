@@ -43,6 +43,7 @@ import {
   EXTRACT_ORCHESTRATOR_PROMPT,
   extractSubagentPrompt,
   extractSystemPrompt,
+  PBI_SYSTEM_PROMPT,
   REFINE_SYSTEM_PROMPT,
   SUMMARIZE_SYSTEM_PROMPT,
   SYSTEM_PROMPT,
@@ -53,6 +54,7 @@ import {
   CONFLICT_SCHEMA,
   ENTRY_REVISE_SCHEMA,
   EXTRACT_SCHEMA,
+  PBI_SCHEMA,
   REFINE_SCHEMA,
   SUMMARIZE_SCHEMA,
 } from "./schema";
@@ -261,6 +263,94 @@ export async function refineCard(
     throw new Error(`校正に失敗しました: ${errors}`);
   }
   throw new Error("校正で有効な応答が得られませんでした");
+}
+
+// ---- PBI 化(EARS 記法の要求つきバックログアイテム) ---------------------------
+
+export interface PbiRequest {
+  /** 対象ストーリーの本文 */
+  storyText: string;
+  /** ストーリーの主語アクター名 */
+  actorName?: string;
+  /** ぶら下がっているタスクの本文 */
+  actionText?: string;
+  /** 同じステップの他タスク(文脈用) */
+  sceneActions?: string[];
+  /** アクティビティ(帯)の名前 */
+  flowName?: string;
+}
+
+export interface PbiResult {
+  title: string;
+  userStory: string;
+  background: string;
+  requirements: { pattern: string; text: string }[];
+  openQuestions: string[];
+}
+
+/**
+ * ストーリー 1 枚を PBI(EARS 記法の要求つき)へ変換する。
+ * chatContext(合意済みマップ・論点・現在のマップ)を注入し、
+ * 数値・値域などのドメイン知識は kb-* skill から必要なときだけ読む。
+ */
+export async function generatePbi(
+  boardId: string,
+  req: PbiRequest,
+  chatContext: string,
+): Promise<PbiResult> {
+  const workspace = workspaceDir(boardId);
+  await fs.mkdir(workspace, { recursive: true });
+
+  const context = [
+    req.actorName ? `アクター: ${req.actorName}` : null,
+    req.actionText ? `タスク: ${req.actionText}` : null,
+    req.flowName ? `アクティビティ(帯): ${req.flowName}` : null,
+    req.sceneActions?.length
+      ? `同じステップの他タスク: ${req.sceneActions.join(" / ")}`
+      : null,
+  ]
+    .filter((s): s is string => s !== null)
+    .join("\n");
+
+  const q = query({
+    prompt: `次のストーリーを PBI 化してください。\n\n${context}\n\nストーリー:\n${req.storyText}`,
+    options: {
+      model: process.env.ANTHROPIC_MODEL || undefined,
+      cwd: workspace,
+      systemPrompt: withChatContext(PBI_SYSTEM_PROMPT, chatContext),
+      settingSources: ["project"],
+      skills: "all",
+      allowedTools: [],
+      maxTurns: 8,
+      outputFormat: { type: "json_schema", schema: PBI_SCHEMA },
+      hooks: workspaceGuard(workspace),
+    },
+  });
+
+  for await (const message of q) {
+    if (message.type !== "result") continue;
+    if (message.subtype === "success") {
+      console.log(
+        JSON.stringify({
+          at: new Date().toISOString(),
+          kind: "pbi-usage",
+          turns: message.num_turns,
+          durationMs: message.duration_ms,
+          usage: message.usage,
+          costUsd: message.total_cost_usd,
+        }),
+      );
+      const output = message.structured_output as PbiResult | undefined;
+      if (!output) throw new Error("PBI の生成結果が得られませんでした");
+      return output;
+    }
+    const errors =
+      "errors" in message && Array.isArray(message.errors)
+        ? message.errors.join(" / ")
+        : message.subtype;
+    throw new Error(`PBI の生成に失敗しました: ${errors}`);
+  }
+  throw new Error("PBI の生成で有効な応答が得られませんでした");
 }
 
 // ---- 会話履歴の要約(compaction) ---------------------------------------------
