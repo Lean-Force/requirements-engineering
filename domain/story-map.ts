@@ -90,11 +90,34 @@ export function normalizeStoryMap(map: StoryMap): StoryMap {
     };
   });
 
+  // 不変条件「1 ステップに各アクター最大 1 タスク」を強制する(UI の格子は
+  // アクター × ステップの交点に 1 枚しか表示できない。2 枚目以降は見えなくなる)。
+  // 同じアクターの 2 巡目以降のタスクは、直後の新しいステップへ「巡」ごとに
+  // まとめて分割する(例: 支払う/会計する + レシートを渡す/受け取る が同居したら、
+  // レシートのペアが次のステップになる)。帯(flowName)・随時は引き継ぐ。
+  const split = activities.flatMap((activity) => {
+    const rounds: (typeof activity.actions)[] = [];
+    const seen = new Map<string, number>(); // actorId → 出現回数
+    for (const action of activity.actions) {
+      const round = seen.get(action.actorId) ?? 0;
+      seen.set(action.actorId, round + 1);
+      (rounds[round] ??= []).push(action);
+    }
+    if (rounds.length <= 1) return [activity];
+    return rounds.map((actions, i) => {
+      if (i === 0) return { ...activity, actions };
+      // 分割後の id は決定的に採番する(再正規化しても増殖しない)
+      const { storyOrder: _omit, ...rest } = activity;
+      void _omit;
+      return { ...rest, id: `${activity.id}-r${i + 1}`, actions };
+    });
+  });
+
   // 連続した流れ(時系列)を先に、随時・例外のステップを末尾にまとめる。
   // さらに連続側はアクティビティ(flowName)ごとに隣接へクラスタ化する
   // (流れの初出順・流れ内の元順を保つ。名前なしのステップは単独の塊として扱う)。
-  const flow = activities.filter((a) => a.standalone !== true);
-  const standalone = activities.filter((a) => a.standalone === true);
+  const flow = split.filter((a) => a.standalone !== true);
+  const standalone = split.filter((a) => a.standalone === true);
   const order: string[] = [];
   const buckets = new Map<string, typeof flow>();
   flow.forEach((a, i) => {

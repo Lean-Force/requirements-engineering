@@ -250,11 +250,16 @@ describe("applyAiUpdate(AI 出力の取り込みパイプライン)", () => {
     // 確定 s3 が復元されている
     const s3 = r.activities[0].actions[0].stories.find((s) => s.id === "s3");
     expect(s3?.fixed).toBe(true);
-    // 無効な actorId は正規化される
-    expect(r.activities[0].actions[1].actorId).toBe("a1");
-    // 表示順: s4 先頭が維持され、消えた id は掃除済み・新規は末尾
-    expect(columnIds(r, "act1")[0]).toBe("s4");
-    expect(r.activities[0].storyOrder).not.toContain("s2");
+    // 無効な actorId は正規化され(先頭アクター a1 へフォールバック)、
+    // act1 に a1 のタスクが 2 枚になるため、不変条件により ac2 は
+    // 直後の新ステップへ分割される(ストーリー s4 も一緒に移動)
+    const ac2Home = r.activities.find((a) => a.actions.some((x) => x.id === "ac2"))!;
+    expect(ac2Home.id).not.toBe("act1");
+    expect(ac2Home.actions.find((x) => x.id === "ac2")!.actorId).toBe("a1");
+    expect(columnIds(r, ac2Home.id)).toContain("s4");
+    // 表示順: 消えた id(s2)は掃除済み・新規 s5 は末尾
+    expect(columnIds(r, "act1")).not.toContain("s2");
+    expect(columnIds(r, "act1")[columnIds(r, "act1").length - 1]).toBe("s5");
   });
 });
 
@@ -385,5 +390,77 @@ describe("リリースライン", () => {
   it("setReleases: リリース定義を更新できる", () => {
     const updated = setReleases(base, [{ name: "Alpha" }, { name: "Beta" }, { name: "GA" }]);
     expect(updated.releases).toEqual([{ name: "Alpha" }, { name: "Beta" }, { name: "GA" }]);
+  });
+});
+
+describe("不変条件: 1 ステップに各アクター最大 1 タスク(正規化で分割)", () => {
+  const base = {
+    actors: [
+      { id: "cust", name: "お客様" },
+      { id: "staff", name: "スタッフ" },
+    ],
+    activities: [
+      {
+        id: "kaikei",
+        flowName: "会計",
+        actions: [
+          { id: "a1", actorId: "cust", text: "支払う", stories: [] },
+          { id: "a2", actorId: "staff", text: "会計する", stories: [] },
+          {
+            id: "a3",
+            actorId: "staff",
+            text: "レシートを渡す",
+            stories: [{ id: "s1", text: "スタッフは、レシートを渡したい。なぜなら控えが要るからだ。" }],
+          },
+          { id: "a4", actorId: "cust", text: "レシートを受け取る", stories: [] },
+        ],
+      },
+    ],
+  };
+
+  it("同一アクターの 2 巡目はペアのまま直後の新ステップへ分割され、帯を引き継ぐ", () => {
+    const m = normalizeStoryMap(base);
+    expect(m.activities).toHaveLength(2);
+    expect(m.activities[0].actions.map((a) => a.text)).toEqual(["支払う", "会計する"]);
+    expect(m.activities[1].actions.map((a) => a.text)).toEqual([
+      "レシートを渡す",
+      "レシートを受け取る",
+    ]);
+    expect(m.activities[1].flowName).toBe("会計"); // 帯を引き継ぐ
+    expect(m.activities[1].actions[0].stories[0].id).toBe("s1"); // ストーリーも一緒に移動
+  });
+
+  it("分割は冪等(再正規化してもステップが増殖しない)", () => {
+    const once = normalizeStoryMap(base);
+    const twice = normalizeStoryMap(once);
+    expect(twice).toEqual(once);
+  });
+
+  it("随時ステップの分割も随時のまま", () => {
+    const m = normalizeStoryMap({
+      actors: [{ id: "op", name: "オペレーター" }],
+      activities: [
+        {
+          id: "adhoc",
+          standalone: true,
+          actions: [
+            { id: "b1", actorId: "op", text: "受け付ける", stories: [] },
+            { id: "b2", actorId: "op", text: "折り返す", stories: [] },
+          ],
+        },
+      ],
+    });
+    expect(m.activities).toHaveLength(2);
+    expect(m.activities.every((a) => a.standalone === true)).toBe(true);
+  });
+
+  it("重複が無いマップは変化しない", () => {
+    const clean = normalizeStoryMap({
+      actors: [{ id: "cust", name: "お客様" }],
+      activities: [
+        { id: "x", actions: [{ id: "a", actorId: "cust", text: "選ぶ", stories: [] }] },
+      ],
+    });
+    expect(clean.activities).toHaveLength(1);
   });
 });
