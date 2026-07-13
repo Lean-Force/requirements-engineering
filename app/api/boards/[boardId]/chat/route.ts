@@ -152,7 +152,10 @@ export async function POST(request: Request, { params }: Params) {
 
       // AI 出力を保存してよい形へ整える(正規化・確定要素の保護・表示順の引き継ぎ)。
       // 手順の順序は domain.applyAiUpdate に閉じている。
-      const updatedMap = applyAiUpdate(currentMap, parsed.storyMap);
+      // storyMap が null のターン(質問への回答など)はマップ無変更 = 現在のマップを維持
+      const updatedMap = parsed.storyMap
+        ? applyAiUpdate(currentMap, parsed.storyMap)
+        : currentMap;
 
       // この 1 ターンを永続化(マップ更新 + 版追加 + 会話保存)。
       const fullConversation: ChatMessage[] = [

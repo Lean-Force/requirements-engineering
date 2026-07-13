@@ -408,7 +408,9 @@ async function main() {
         [{ role: "user", content: c.message }],
         chatContext,
       );
-      const mapJson = JSON.stringify(res.storyMap);
+      // storyMap が null のターンは「マップ無変更」= 入力マップが維持される
+      const effectiveMap = res.storyMap ?? map;
+      const mapJson = JSON.stringify(effectiveMap);
 
       const problems: string[] = [];
       for (const t of c.mapMustInclude ?? [])
@@ -422,7 +424,7 @@ async function main() {
           problems.push(`skill「${s}」を読んでいない(読んだ: ${res.usedSkills.join(", ") || "なし"})`);
       if (c.skillsMustBeEmpty && res.usedSkills.length > 0)
         problems.push(`不要な skill を読んだ: ${res.usedSkills.join(", ")}`);
-      if (c.check) problems.push(...c.check(res.storyMap as never, res.reply));
+      if (c.check) problems.push(...c.check(effectiveMap as never, res.reply));
 
       if (problems.length === 0) {
         passes++;

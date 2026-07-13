@@ -9,7 +9,12 @@ export const CHAT_OUTPUT_SCHEMA: Record<string, unknown> = {
   required: ["reply", "storyMap"],
   properties: {
     reply: { type: "string" },
-    storyMap: STORY_MAP_JSON_SCHEMA,
+    // マップを変更しないターンは null(マップ全体の再出力を省き、応答を速くする)
+    storyMap: {
+      anyOf: [STORY_MAP_JSON_SCHEMA, { type: "null" }],
+      description:
+        "更新後のマップ全体。マップを一切変更しないターンでは null(現在のマップが維持される)",
+    },
   },
 };
 

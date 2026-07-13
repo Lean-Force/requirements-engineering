@@ -98,7 +98,11 @@ export async function generate(
   knowledgeHandlers?: KnowledgeToolHandlers,
   historySummary?: string,
 ): Promise<
-  Pick<ChatResponse, "reply" | "storyMap"> & { usedSkills: string[] }
+  Pick<ChatResponse, "reply"> & {
+    /** 更新後のマップ全体。マップを変更しないターンは null(再出力の省略) */
+    storyMap: StoryMap | null;
+    usedSkills: string[];
+  }
 > {
   const workspace = workspaceDir(boardId);
   // cwd に指定するため、初回チャット時などまだ無ければ作る(無いと spawn に失敗する)
@@ -173,7 +177,7 @@ export async function generate(
         }),
       );
       const output = message.structured_output as
-        | { reply: string; storyMap: StoryMap }
+        | { reply: string; storyMap: StoryMap | null }
         | undefined;
       if (!output) {
         throw new Error("モデルから構造化出力が得られませんでした");
