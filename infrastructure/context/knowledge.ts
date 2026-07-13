@@ -35,6 +35,7 @@ import {
 } from "../agent";
 import type { DetectedBusiness, DetectedConflict, ExtractedEntry } from "../agent";
 import { createBoard, listBoards } from "../boards";
+import { renderDiscussions } from "../discussions";
 import { isSupportedFile, parseFile } from "./parse";
 import {
   conflictsFile,
@@ -734,6 +735,11 @@ export async function buildChatContext(
   }
 
   const map = currentMap ?? (await loadStoryMap(boardId));
+
+  // 論点(未解決 = 議論の文脈 / 解決済み = 合意の記録)。無ければ空
+  const discussions = await renderDiscussions(boardId, map);
+  if (discussions) sections.push(discussions);
+
   sections.push(
     `# 現在の User Story Map(この業務の現状)\n\n${JSON.stringify(map)}`,
   );

@@ -3,7 +3,7 @@
 import { Fragment, useRef, useState } from "react";
 import type { ReleaseDef, StoryMap } from "@/domain";
 import * as domain from "@/domain";
-import type { RefineRequest, RefineResponse } from "@/contracts";
+import type { DiscussionPoint, DiscussionTarget, RefineRequest, RefineResponse } from "@/contracts";
 import CardEditModal from "./CardEditModal";
 
 /** 📌 でチャットの対象に選ばれた付箋(ストーリーまたはタスク) */
@@ -20,6 +20,10 @@ interface Props {
   onPickTarget?: (pick: PickTarget) => void;
   /** 付箋の AI 校正(未指定ならモーダルにボタンが出ない) */
   onRefine?: (req: RefineRequest) => Promise<RefineResponse | { error: string }>;
+  /** 要素 id → 未解決の論点(💬 バッジとボード上の付箋表示。未指定なら非表示) */
+  openDiscussionsOf?: (targetId: string) => DiscussionPoint[];
+  /** 💬 から論点モーダルを開く(未指定ならバッジ非表示) */
+  onOpenDiscussions?: (target: DiscussionTarget, label: string) => void;
 }
 
 // インライン編集状態(ストーリー / タスク / アクターを単一の状態で扱う)。
@@ -110,7 +114,9 @@ function noteFontSize(text: string): number {
 
 type Activity = StoryMap["activities"][number];
 
-export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Props) {
+export default function Board({ storyMap, onChange, onPickTarget, onRefine, openDiscussionsOf, onOpenDiscussions }: Props) {
+  // 未解決の論点(無指定なら空)。議論中の視覚状態とボード上の論点付箋に使う
+  const openDisc = (id: string) => openDiscussionsOf?.(id) ?? [];
   const { actors, activities } = storyMap;
 
   // ストーリーの D&D 並び替え(同じ列 = ステップ内で上下自由。所属・色は変えない)。
@@ -365,8 +371,9 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                     <Fragment key={activity.id}>
                       {flowDivider(activity, true)}
                       <div
-                        className={`activity-head${activity.standalone ? " standalone" : ""}`}
+                        className={`activity-head${activity.standalone ? " standalone" : ""}${openDisc(activity.id).length > 0 ? " has-discussion" : ""}`}
                         style={{ width: COL_W }}
+                        title={openDisc(activity.id).map((d) => `💬 ${d.text}`).join("\n") || undefined}
                       >
                         <button
                           className={`standalone-toggle${activity.standalone ? " on" : ""}`}
@@ -379,6 +386,20 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                         >
                           {activity.standalone ? "随時" : "→随時"}
                         </button>
+                        {onOpenDiscussions && (
+                          <button
+                            className={`disc-badge${openDisc(activity.id).length > 0 ? " has-open" : ""}`}
+                            title="このステップの論点"
+                            onClick={() =>
+                              onOpenDiscussions(
+                                { kind: "activity", id: activity.id },
+                                `ステップ(${activity.actions.map((a) => a.text).join(" / ") || "空"})`,
+                              )
+                            }
+                          >
+                            💬{openDisc(activity.id).length > 0 ? openDisc(activity.id).length : ""}
+                          </button>
+                        )}
                         <button
                           className="del-activity"
                           title="このステップ(列)を削除"
@@ -431,10 +452,13 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
 
                           {action ? (
                             <div
-                              className={`note clickable${action.fixed ? " fixed" : ""}`}
+                              className={`note clickable${action.fixed ? " fixed" : ""}${openDisc(action.id).length > 0 ? " has-discussion" : ""}`}
                               data-action-id={action.id}
                               data-activity-id={activity.id}
-                              title={action.fixed ? `🔒 確定済み: ${action.text}` : action.text}
+                              title={[
+                                action.fixed ? `🔒 確定済み: ${action.text}` : action.text,
+                                ...openDisc(action.id).map((d) => `💬 ${d.text}`),
+                              ].join("\n")}
                               style={{ background: color.bg, borderColor: color.border }}
                               onClick={() =>
                                 setEditor({
@@ -460,6 +484,18 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                                   }}
                                 >
                                   📌
+                                </button>
+                              )}
+                              {onOpenDiscussions && (
+                                <button
+                                  className={`disc-badge${openDisc(action.id).length > 0 ? " has-open" : ""}`}
+                                  title="このタスクの論点"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onOpenDiscussions({ kind: "action", id: action.id }, `タスク「${action.text}」`);
+                                  }}
+                                >
+                                  💬{openDisc(action.id).length > 0 ? openDisc(action.id).length : ""}
                                 </button>
                               )}
                               {!action.fixed && (
@@ -643,9 +679,9 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                               const c = colorOf(action.actorId);
                               const displayIndex = sectionStart + localIdx;
                               return (
+                                <Fragment key={st.id}>
                                 <div
-                                  key={st.id}
-                                  className={`story-card clickable${st.fixed ? " fixed" : ""}${
+                                  className={`story-card clickable${st.fixed ? " fixed" : ""}${openDisc(st.id).length > 0 ? " has-discussion" : ""}${
                                     draggingStory?.storyId === st.id ? " dragging" : ""
                                   }${
                                     dropHint?.storyId === st.id
@@ -716,6 +752,18 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                                       📌
                                     </button>
                                   )}
+                                  {onOpenDiscussions && (
+                                    <button
+                                      className={`disc-badge${openDisc(st.id).length > 0 ? " has-open" : ""}`}
+                                      title="このストーリーの論点"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        onOpenDiscussions({ kind: "story", id: st.id }, `ストーリー「${st.text}」`);
+                                      }}
+                                    >
+                                      💬{openDisc(st.id).length > 0 ? openDisc(st.id).length : ""}
+                                    </button>
+                                  )}
                                   {!st.fixed && (
                                     <button className="del-story" title="このストーリーを削除"
                                       onClick={(e) => { e.stopPropagation(); removeStoryCard(activity.id, action.id, st.id); }}>
@@ -723,6 +771,20 @@ export default function Board({ storyMap, onChange, onPickTarget, onRefine }: Pr
                                     </button>
                                   )}
                                 </div>
+                                {/* 議論中の論点をボード上に見せる付箋(未解決のみ)。クリックで論点モーダル */}
+                                {openDisc(st.id).length > 0 && onOpenDiscussions && (
+                                  <button
+                                    className="disc-sticky"
+                                    title={openDisc(st.id).map((d) => `💬 ${d.text}`).join("\n")}
+                                    onClick={() =>
+                                      onOpenDiscussions({ kind: "story", id: st.id }, `ストーリー「${st.text}」`)
+                                    }
+                                  >
+                                    💬 {openDisc(st.id)[0].text}
+                                    {openDisc(st.id).length > 1 ? ` 他${openDisc(st.id).length - 1}件` : ""}
+                                  </button>
+                                )}
+                                </Fragment>
                               );
                             })}
                           </div>

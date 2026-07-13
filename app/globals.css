@@ -372,3 +372,52 @@ body,html{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
 .release-line-full.drop-zone:hover{background:rgba(79,70,229,.08)}
 .col-drop-zone{min-height:40px;border-radius:4px;transition:background .15s}
 .col-drop-zone:hover{background:rgba(79,70,229,.06)}
+
+/* ===== 論点(議論ポイント) ===== */
+/* 付箋・ステップの 💬 バッジ。未解決があるときは常時表示、無ければホバーで出る */
+.disc-badge{position:absolute;bottom:3px;left:3px;z-index:2;display:flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 3px;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--muted);font-size:9px;line-height:1;cursor:pointer;opacity:0;box-shadow:0 1px 3px rgba(0,0,0,.18);transition:opacity .12s,transform .12s,border-color .12s}
+.story-card:hover .disc-badge,.note:hover .disc-badge,.activity-head:hover .disc-badge{opacity:1}
+.disc-badge.has-open{opacity:1;border-color:#e5903a;background:#fdf3e3;color:#a05a12;font-weight:700}
+.disc-badge:hover{border-color:var(--accent);transform:scale(1.1)}
+.activity-head .disc-badge{position:static;margin-right:2px}
+/* ヘッダーの論点ボタン */
+.discussions-open{flex:0 0 auto;padding:6px 12px;font-size:13px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--text);cursor:pointer}
+.discussions-open:hover{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+/* モーダル */
+.discussion-overlay{position:fixed;inset:0;background:rgba(31,36,48,.45);display:flex;align-items:center;justify-content:center;z-index:40}
+.discussion-modal{width:min(560px,92vw);max-height:80vh;overflow-y:auto;background:var(--panel);border-radius:12px;box-shadow:0 16px 48px rgba(31,36,48,.25);display:flex;flex-direction:column;padding:16px;gap:10px}
+.discussion-header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.discussion-header h3{margin:0;font-size:14px;line-height:1.5;word-break:break-word}
+.discussion-close{border:none;background:transparent;font-size:20px;line-height:1;color:var(--muted);cursor:pointer}
+.discussion-close:hover{color:var(--text)}
+.discussion-add{display:flex;flex-direction:column;gap:6px}
+.discussion-add textarea{width:100%;min-height:52px;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13px;line-height:1.6;resize:vertical;font-family:inherit}
+.discussion-add button{align-self:flex-end;padding:6px 14px;font-size:12px;border:1px solid var(--accent);border-radius:8px;background:var(--accent);color:#fff;cursor:pointer}
+.discussion-add button:disabled{opacity:.45;cursor:default}
+.discussion-modal h4{margin:6px 0 0;font-size:12px;color:var(--muted)}
+.discussion-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.discussion-item{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:6px;border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:13px}
+.discussion-item.open{border-left:3px solid #e5903a}
+.discussion-item.resolved{border-left:3px solid #4ba36a;background:rgba(75,163,106,.06)}
+.discussion-body{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:4px}
+.discussion-target{font-size:11px;color:var(--muted);word-break:break-word}
+.discussion-text{line-height:1.6;word-break:break-word}
+.discussion-resolution{font-size:12px;line-height:1.6;color:#2f7a4d;word-break:break-word}
+.discussion-actions{display:flex;align-items:center;gap:6px}
+.discussion-actions button{padding:4px 10px;font-size:11px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--text);cursor:pointer}
+.discussion-actions button:hover{border-color:var(--accent);color:var(--accent)}
+.discussion-actions .discussion-delete:hover{border-color:#ef4444;color:#ef4444}
+.discussion-resolve-form{flex:1 0 100%;display:flex;flex-direction:column;gap:6px}
+.discussion-resolve-form textarea{width:100%;min-height:48px;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.6;resize:vertical;font-family:inherit}
+.discussion-resolve-buttons{display:flex;gap:6px;justify-content:flex-end}
+.discussion-resolve-buttons button{padding:5px 12px;font-size:11px;border:1px solid var(--border);border-radius:7px;background:var(--panel);cursor:pointer}
+.discussion-resolve-buttons button:first-child{background:#4ba36a;border-color:#4ba36a;color:#fff}
+.discussion-resolve-buttons button:disabled{opacity:.45;cursor:default}
+.discussion-empty{margin:4px 0;font-size:12px;color:var(--muted)}
+
+/* 議論中の視覚状態: 未解決の論点が付いた要素はオレンジの点線枠(確定 🔒 と対になる状態表現) */
+.story-card.has-discussion,.note.has-discussion{outline:2px dashed #e5903a;outline-offset:2px}
+.activity-head.has-discussion{background:#fdf3e3;border:1px dashed #e5903a;border-radius:6px}
+/* ボード上の論点付箋(ストーリーの下にぶら下がる。未解決のみ) */
+.disc-sticky{width:140px;box-sizing:border-box;text-align:left;border:1px solid #e6c46a;border-left:3px solid #e5903a;background:#fdf3d0;border-radius:4px;padding:5px 7px;font-size:10px;line-height:1.45;color:#7a5a12;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.12);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+.disc-sticky:hover{border-color:#e5903a;background:#fceebc}

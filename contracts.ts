@@ -178,10 +178,35 @@ export interface KnowledgeState {
 
 /** サーバーから push されるボード同期イベント(SSE) */
 export interface BoardEvent {
-  type: "storymap" | "chat:start" | "chat:end" | "contexts";
+  type: "storymap" | "chat:start" | "chat:end" | "contexts" | "discussions";
   /** 対象ボード。"*" は全ボード向け(共通知識の変更など) */
   boardId: string;
   at: string;
+}
+
+/** 論点(議論ポイント)を付ける対象 */
+export interface DiscussionTarget {
+  /** story / action / activity(ステップ)の要素、または board(ボード全体) */
+  kind: "story" | "action" | "activity" | "board";
+  /** 要素の id(kind = board のときはボード id) */
+  id: string;
+}
+
+/**
+ * 論点(議論ポイント)。ストーリー・タスク・ステップ・ボード全体に付けるメモ。
+ * 解決時に「結論と理由」を書くことで、そのまま合意の記録(rationale)になる。
+ * 追加・解決・削除はすべて手動(UI)。AI は参照情報として見るだけで変更できない。
+ */
+export interface DiscussionPoint {
+  id: string;
+  target: DiscussionTarget;
+  /** 論点の内容(何が未解決か・何を議論すべきか) */
+  text: string;
+  status: "open" | "resolved";
+  /** 解決時の結論と理由(resolved のとき必須) */
+  resolution?: string;
+  createdAt: string;
+  resolvedAt?: string;
 }
 
 /** ボード(= 業務)のメタ情報 */

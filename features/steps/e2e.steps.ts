@@ -159,7 +159,7 @@ Then(
     await expect
       .poll(async () =>
         (await this.page.locator(".story-card").allTextContents())
-          .map((t) => t.replace(/×|📌/g, "").trim())
+          .map((t) => t.replace(/×|📌|💬\d*/g, "").trim())
           .join(", "),
       )
       .toBe(expected);

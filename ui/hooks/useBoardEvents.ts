@@ -12,6 +12,7 @@ export interface BoardEventHandlers {
   onChatStart?: () => void;
   onChatEnd?: () => void;
   onContexts?: () => void;
+  onDiscussions?: () => void;
 }
 
 export function useBoardEvents(apiBase: string, handlers: BoardEventHandlers) {
@@ -41,6 +42,9 @@ export function useBoardEvents(apiBase: string, handlers: BoardEventHandlers) {
           break;
         case "contexts":
           ref.current.onContexts?.();
+          break;
+        case "discussions":
+          ref.current.onDiscussions?.();
           break;
       }
     };

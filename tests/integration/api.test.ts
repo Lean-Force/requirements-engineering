@@ -24,6 +24,14 @@ import { DELETE as conflictDelete } from "@/app/api/boards/[boardId]/contexts/co
 import { POST as proposalAccept } from "@/app/api/boards/[boardId]/contexts/proposals/[proposalId]/accept/route";
 import { DELETE as proposalDismiss } from "@/app/api/boards/[boardId]/contexts/proposals/[proposalId]/route";
 import { POST as refinePost } from "@/app/api/boards/[boardId]/refine/route";
+import {
+  GET as discussionsGet,
+  POST as discussionsPost,
+} from "@/app/api/boards/[boardId]/discussions/route";
+import {
+  DELETE as discussionDelete,
+  PATCH as discussionPatch,
+} from "@/app/api/boards/[boardId]/discussions/[discussionId]/route";
 import { GET as knowledgeGet } from "@/app/api/knowledge/route";
 import {
   applySource,
@@ -274,5 +282,74 @@ describe("ボード管理ルート", () => {
     expect(del.status).toBe(200);
     await expect(fs.access(path.join(tmp, "workspaces", BOARD))).rejects.toThrow();
     await expect(fs.access(snippet)).rejects.toThrow();
+  });
+});
+
+describe("論点(discussions)ルート", () => {
+  const STORY_MAP = {
+    actors: [{ id: "a1", name: "店員" }],
+    activities: [
+      {
+        id: "act1",
+        actions: [
+          {
+            id: "ac1",
+            actorId: "a1",
+            text: "会計する",
+            stories: [{ id: "s1", text: "店員は、素早く会計したい。なぜなら行列を作りたくないからだ。" }],
+          },
+        ],
+      },
+    ],
+  };
+
+  it("追加 → 一覧 → 解決(結論必須) → 削除の全配線", async () => {
+    await storymapPut(json("PUT", STORY_MAP), params());
+
+    // バリデーション: target/text 不足は 400
+    const bad = await discussionsPost(json("POST", { text: "x" }), params());
+    expect(bad.status).toBe(400);
+
+    const added = await discussionsPost(
+      json("POST", { target: { kind: "story", id: "s1" }, text: "上限金額は要確認" }),
+      params(),
+    );
+    expect(added.status).toBe(200);
+    const point = (await added.json()) as { id: string };
+
+    const list = await discussionsGet(json("GET"), params());
+    expect(((await list.json()) as unknown[]).length).toBe(1);
+
+    // 結論なしの解決は 400
+    const noRes = await discussionPatch(
+      json("PATCH", { action: "resolve" }),
+      params({ discussionId: point.id }),
+    );
+    expect(noRes.status).toBe(400);
+
+    const resolved = await discussionPatch(
+      json("PATCH", { action: "resolve", resolution: "上限は 10 万円。少額決済が主のため" }),
+      params({ discussionId: point.id }),
+    );
+    expect(resolved.status).toBe(200);
+    expect(((await resolved.json()) as { status: string }).status).toBe("resolved");
+
+    const del = await discussionDelete(json("DELETE"), params({ discussionId: point.id }));
+    expect(del.status).toBe(200);
+    const after = await discussionsGet(json("GET"), params());
+    expect(((await after.json()) as unknown[]).length).toBe(0);
+  });
+
+  it("存在しない論点の操作は 404、存在しないボードは 404", async () => {
+    const patch = await discussionPatch(
+      json("PATCH", { action: "reopen" }),
+      params({ discussionId: "disc-nai" }),
+    );
+    expect(patch.status).toBe(404);
+
+    const res = await discussionsGet(json("GET"), {
+      params: { boardId: "board-nai" },
+    });
+    expect(res.status).toBe(404);
   });
 });

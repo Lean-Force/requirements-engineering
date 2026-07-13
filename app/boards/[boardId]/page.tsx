@@ -8,6 +8,7 @@ import PanZoom from "@/ui/PanZoom";
 import ChatPanel from "@/ui/ChatPanel";
 import HistoryPanel from "@/ui/HistoryPanel";
 import ContextPanel from "@/ui/ContextPanel";
+import DiscussionPanel, { type DiscussionScope } from "@/ui/DiscussionPanel";
 import BoardSwitcher from "@/ui/BoardSwitcher";
 import { useBoardEvents } from "@/ui/hooks/useBoardEvents";
 import { useUndoRedo } from "@/ui/hooks/useUndoRedo";
@@ -17,6 +18,8 @@ import type {
   BoardMeta,
   ChatMessage,
   ChatResponse,
+  DiscussionPoint,
+  DiscussionTarget,
   KnowledgeState,
   RefineRequest,
   RefineResponse,
@@ -63,6 +66,9 @@ export default function BoardPage({ params }: Props) {
     });
   }, []);
   const [showContexts, setShowContexts] = useState(false);
+  // 論点(議論ポイント)。SSE の discussions 通知で再取得して全員に同期する
+  const [discussions, setDiscussions] = useState<DiscussionPoint[]>([]);
+  const [discussionScope, setDiscussionScope] = useState<DiscussionScope | null>(null);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   // ボードの 📌 で選んだ付箋(ストーリー / 行動。次のチャット送信の対象として AI に渡す)
   const [selectedTarget, setSelectedTarget] = useState<PickTarget | null>(null);
@@ -182,6 +188,43 @@ export default function BoardPage({ params }: Props) {
       });
   }, [api, clearHistory]);
 
+  const refetchDiscussions = useCallback(() => {
+    fetch(`${api}/discussions`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((points: DiscussionPoint[]) => setDiscussions(points))
+      .catch(() => {
+        /* 失敗時は手元の一覧のまま */
+      });
+  }, [api]);
+
+  // 初回 + ボード遷移時に論点を読む
+  useEffect(() => {
+    setDiscussions([]);
+    setDiscussionScope(null);
+    refetchDiscussions();
+  }, [refetchDiscussions]);
+
+  // 論点一覧の対象ラベル(全論点表示のときに使う)
+  const labelOfTarget = useCallback(
+    (target: DiscussionTarget): string => {
+      if (target.kind === "board") return "ボード全体";
+      for (const act of storyMap.activities) {
+        if (target.kind === "activity" && act.id === target.id) {
+          return `ステップ(${act.actions.map((a) => a.text).join(" / ") || "空"})`;
+        }
+        for (const a of act.actions) {
+          if (target.kind === "action" && a.id === target.id) return `タスク「${a.text}」`;
+          if (target.kind === "story") {
+            const s = a.stories.find((x) => x.id === target.id);
+            if (s) return `ストーリー「${s.text}」`;
+          }
+        }
+      }
+      return "(削除された要素)";
+    },
+    [storyMap],
+  );
+
   // SSE でボードの変更を購読(薄い通知 → 再取得)
   useBoardEvents(api, {
     onStorymap: refetchSession,
@@ -198,6 +241,7 @@ export default function BoardPage({ params }: Props) {
           /* 失敗時は手元の一覧のまま */
         });
     },
+    onDiscussions: refetchDiscussions,
   });
 
   // チャット送信の共通コア(nextMessages の末尾はユーザー発言)
@@ -567,6 +611,20 @@ export default function BoardPage({ params }: Props) {
                 ? `(${knowledge.categories.reduce((n, c) => n + c.count, 0)})`
                 : ""}
             </button>
+            <button
+              className="discussions-open"
+              onClick={() =>
+                setDiscussionScope({
+                  target: { kind: "board", id: boardId },
+                  label: `${board?.name ?? "このボード"}(全体)`,
+                })
+              }
+            >
+              💬 論点
+              {discussions.filter((d) => d.status === "open").length > 0
+                ? `(${discussions.filter((d) => d.status === "open").length})`
+                : ""}
+            </button>
             <button className="history-toggle" onClick={openHistory}>
               Versions{versions.length > 0 ? `(${versions.length})` : ""}
             </button>
@@ -580,6 +638,10 @@ export default function BoardPage({ params }: Props) {
                 onChange={updateStoryMap}
                 onPickTarget={setSelectedTarget}
                 onRefine={refineCard}
+                openDiscussionsOf={(id) =>
+                  discussions.filter((d) => d.status === "open" && d.target.id === id)
+                }
+                onOpenDiscussions={(target, label) => setDiscussionScope({ target, label })}
               />
             </PanZoom>
           ) : (
@@ -592,6 +654,16 @@ export default function BoardPage({ params }: Props) {
             restoringId={restoringId}
             onRestore={restoreVersion}
             onClose={() => setShowHistory(false)}
+          />
+        )}
+        {discussionScope && (
+          <DiscussionPanel
+            apiBase={api}
+            scope={discussionScope}
+            points={discussions}
+            labelOf={labelOfTarget}
+            onChanged={refetchDiscussions}
+            onClose={() => setDiscussionScope(null)}
           />
         )}
         {showContexts && (

@@ -46,6 +46,7 @@ const { knowledgeFile, readEntries, readSources, sourcesFile, writeJson } =
 const { loadChatSummary, prepareConversation } = await import(
   "../../infrastructure/conversation"
 );
+const { addDiscussion } = await import("../../infrastructure/discussions");
 const { COMMON_SCOPE } = await import("../../infrastructure/context/workspace");
 const { loadStoryMap } = await import("../../infrastructure/storage");
 const { seedComplexBank } = await import("../fixtures/complex-bank");
@@ -231,6 +232,23 @@ const CASES: EvalCase[] = [
       });
       await writeJson(sourcesFile(COMMON_SCOPE), sources);
       await writeJson(knowledgeFile(COMMON_SCOPE), [...entries, ...bulk, target]);
+    },
+  },
+  {
+    // 論点(手動メモ)が常時注入され、AI が議論の文脈として踏まえるか。
+    // 未解決の論点が付いたストーリーの確定可否を聞くと、論点に触れて
+    // 決め打ちしないことを期待する
+    name: "未解決の論点を踏まえて答える(決め打ちしない)",
+    boardId: "cx-domestic",
+    message:
+      "「振込先を登録リストから選びたい」のストーリーは、チームで確定(合意)して問題なさそう？reply で。マップは変えないで。",
+    replyMustInclude: ["上限"],
+    setup: async () => {
+      await addDiscussion(
+        "cx-domestic",
+        { kind: "story", id: "dm-s1" },
+        "登録リストの上限件数が未決(10件か100件かで画面設計が変わる)",
+      );
     },
   },
 ];
